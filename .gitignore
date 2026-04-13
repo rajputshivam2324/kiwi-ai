@@ -1,0 +1,6 @@
+.env
+docker-compose.yml
+node_modules
+venv
+dist
+workspaces

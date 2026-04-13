@@ -1,0 +1,24 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+python-dotenv
+
+# LangChain ecosystem
+langchain
+langchain-community
+langchain-nvidia-ai-endpoints
+deepagents
+
+# Vector store
+chromadb
+
+# arXiv integration
+arxiv
+pypdf
+
+# Database
+asyncpg
+
+# Utils
+httpx

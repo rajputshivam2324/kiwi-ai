@@ -1,0 +1,578 @@
+/* src/styles/chat-ui.css */
+/* Premium ChatGPT-quality chat interface */
+
+:root {
+  --chat-bg: #ffffff;
+  --sidebar-bg: #f4ebe1;
+  --msg-user-bg: #f7f7f8;
+  --msg-user-text: #0d0d0d;
+  --msg-bot-text: #0f0f0f;
+  --code-bg: #f9f9f9;
+  --code-header-bg: #ececec;
+  --border-color: rgba(0, 0, 0, 0.08);
+  --accent-color: #10b981;
+  --accent-soft: rgba(16, 185, 129, 0.08);
+}
+
+/* ============================================
+   BASE TEXT
+   ============================================ */
+.chat-container {
+  font-size: 16px;
+  line-height: 1.75;
+}
+
+/* ============================================
+   CHAT MESSAGE ROW — ChatGPT Layout
+   ============================================ */
+.chat-message-row {
+  padding: 1.5rem 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.chat-message-row:last-of-type {
+  border-bottom: none;
+}
+
+.chat-message-user {
+  /* Slightly warm background for user messages */
+}
+
+.chat-message-assistant {
+  /* Clean white for AI */
+}
+
+.chat-message-inner {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  max-width: 100%;
+}
+
+/* Avatar Column */
+.chat-avatar-col {
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.chat-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.chat-avatar-ai {
+  background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+  border: 1.5px solid rgba(16, 185, 129, 0.2);
+  box-shadow: 0 1px 3px rgba(16, 185, 129, 0.1);
+}
+
+.chat-avatar-user {
+  background: linear-gradient(135deg, #18181b 0%, #3f3f46 100%);
+  border: 1.5px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Content Column */
+.chat-content-col {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chat-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #18181b;
+  margin-bottom: 4px;
+  letter-spacing: -0.01em;
+}
+
+.chat-body {
+  color: var(--msg-bot-text);
+  line-height: 1.75;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.prose-container {
+  animation: fadeIn 0.15s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0.5; }
+  to { opacity: 1; }
+}
+
+/* ============================================
+   ACTION BAR — ChatGPT-style hover actions
+   ============================================ */
+.chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 8px;
+  padding-top: 4px;
+}
+
+.chat-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: #a1a1aa;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.chat-action-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #52525b;
+}
+
+.chat-action-btn:active {
+  transform: scale(0.92);
+}
+
+.chat-action-active {
+  color: #10b981 !important;
+}
+
+.chat-action-active:hover {
+  color: #059669 !important;
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.chat-action-active-bad {
+  color: #ef4444 !important;
+}
+
+.chat-action-active-bad:hover {
+  color: #dc2626 !important;
+  background: rgba(239, 68, 68, 0.08);
+}
+
+/* ============================================
+   THINKING / LOADING INDICATORS
+   ============================================ */
+.thinking-indicator {
+  padding: 8px 0;
+}
+
+.thinking-shimmer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: shimmerPulse 2s ease-in-out infinite;
+}
+
+@keyframes shimmerPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.thinking-dots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 0;
+}
+
+.thinking-dot {
+  width: 7px;
+  height: 7px;
+  background: linear-gradient(135deg, #a1a1aa, #71717a);
+  border-radius: 50%;
+  animation: dotBounce 1.4s ease-in-out infinite both;
+}
+
+@keyframes dotBounce {
+  0%, 80%, 100% {
+    transform: scale(0.4);
+    opacity: 0.3;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* ============================================
+   MARKDOWN BODY — Premium Typography
+   ============================================ */
+.markdown-body {
+  color: var(--msg-bot-text);
+  font-size: 16px;
+  line-height: 1.75;
+  word-wrap: break-word;
+}
+
+/* Headings */
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  color: #18181b;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.markdown-body h1 { font-size: 1.6em; }
+.markdown-body h2 { font-size: 1.35em; }
+.markdown-body h3 { font-size: 1.15em; }
+.markdown-body h4 { font-size: 1.05em; }
+
+/* First heading shouldn't have top margin */
+.markdown-body > h1:first-child,
+.markdown-body > h2:first-child,
+.markdown-body > h3:first-child {
+  margin-top: 0.25em;
+}
+
+/* Paragraphs */
+.markdown-body p {
+  margin-top: 0;
+  margin-bottom: 1em;
+}
+
+.markdown-body > p:last-child {
+  margin-bottom: 0;
+}
+
+/* Links */
+.markdown-body a {
+  color: #6366f1;
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.2s ease;
+  border-bottom: 1px solid transparent;
+}
+
+.markdown-body a:hover {
+  color: #4f46e5;
+  border-bottom-color: #4f46e5;
+}
+
+/* Lists */
+.markdown-body ul,
+.markdown-body ol {
+  margin-top: 0;
+  margin-bottom: 1em;
+  padding-left: 1.75em;
+}
+
+.markdown-body li {
+  margin-bottom: 0.4em;
+  line-height: 1.7;
+}
+
+.markdown-body li > p {
+  margin-bottom: 0.4em;
+}
+
+/* Nested lists */
+.markdown-body li > ul,
+.markdown-body li > ol {
+  margin-top: 0.3em;
+  margin-bottom: 0.3em;
+}
+
+/* Strong/Bold */
+.markdown-body strong {
+  font-weight: 650;
+  color: #18181b;
+}
+
+/* Blockquote */
+.markdown-body blockquote {
+  margin: 1em 0;
+  padding: 0.75em 1.25em;
+  color: #52525b;
+  border-left: 3px solid #10b981;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.04) 0%, rgba(16, 185, 129, 0.02) 100%);
+  border-radius: 0 0.625rem 0.625rem 0;
+  font-style: italic;
+}
+
+.markdown-body blockquote p {
+  margin-bottom: 0.5em;
+}
+
+.markdown-body blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+/* Horizontal rule */
+.markdown-body hr {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-color), transparent);
+  border: none;
+  margin: 2em 0;
+}
+
+/* ============================================
+   TABLES — Clean and Modern
+   ============================================ */
+.markdown-body table {
+  width: 100%;
+  margin-bottom: 1.25em;
+  border-collapse: collapse;
+  font-size: 0.92em;
+  border-radius: 0.625rem;
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.markdown-body th,
+.markdown-body td {
+  padding: 0.75em 1em;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  text-align: left;
+}
+
+.markdown-body th {
+  background: linear-gradient(180deg, #fafafa 0%, #f5f5f5 100%);
+  color: #18181b;
+  font-weight: 600;
+  font-size: 0.88em;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.markdown-body tr:nth-child(2n) {
+  background-color: rgba(0, 0, 0, 0.015);
+}
+
+.markdown-body tr:hover {
+  background-color: rgba(0, 0, 0, 0.025);
+}
+
+/* ============================================
+   INLINE CODE
+   ============================================ */
+.markdown-body p code,
+.markdown-body li code,
+.markdown-body td code {
+  background-color: rgba(0, 0, 0, 0.04);
+  color: #be185d;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 0.15em 0.4em;
+  border-radius: 0.375rem;
+  font-size: 0.88em;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  white-space: break-spaces;
+  font-weight: 500;
+}
+
+/* ============================================
+   CODE BLOCKS — Premium Dark with Header
+   ============================================ */
+.code-block-wrapper {
+  margin: 1.25em 0;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  background-color: #1e1e2e;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.code-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background: linear-gradient(180deg, #2a2a3c 0%, #252536 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.78em;
+  color: #a1a1aa;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.code-block-lang {
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #71717a;
+}
+
+.copy-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: none;
+  border: none;
+  color: #71717a;
+  cursor: pointer;
+  padding: 0.25rem 0.6rem;
+  border-radius: 0.375rem;
+  transition: all 0.2s ease;
+  font-size: 0.92em;
+}
+
+.copy-btn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #d4d4d8;
+}
+
+.copy-btn.copied {
+  color: #34d399;
+}
+
+.code-block-body {
+  padding: 1rem 1.25rem;
+  overflow-x: auto;
+  font-size: 0.88em;
+  line-height: 1.6;
+  background-color: #1e1e2e;
+}
+
+.code-block-body pre {
+  margin: 0;
+  background: transparent !important;
+}
+
+.code-block-body code {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* ============================================
+   TYPING INDICATOR — Legacy (kept for compat)
+   ============================================ */
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.5rem 0;
+  height: 24px;
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  background-color: #a1a1aa;
+  border-radius: 50%;
+  animation: typingBounce 1.4s infinite ease-in-out both;
+}
+
+.typing-dot:nth-child(1) { animation-delay: -0.32s; }
+.typing-dot:nth-child(2) { animation-delay: -0.16s; }
+.typing-dot:nth-child(3) { animation-delay: 0s; }
+
+@keyframes typingBounce {
+  0%, 80%, 100% { transform: scale(0); opacity: 0.5; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+/* ============================================
+   OLD MSG BUBBLE STYLES (kept for compat)
+   ============================================ */
+.msg-bubble {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  color: var(--msg-bot-text);
+  line-height: 1.6;
+}
+
+.msg-bubble-user {
+  background-color: var(--msg-user-bg);
+  border-radius: 1.5rem;
+  padding: 1rem 1.5rem;
+  color: var(--msg-user-text);
+  border: 1px solid rgba(0,0,0,0.05);
+}
+
+.msg-bubble-assistant {
+  background-color: transparent;
+  padding: 1rem 0;
+}
+
+/* Tool badge */
+.tool-badge {
+  background-color: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+/* ============================================
+   MATH BLOCKS
+   ============================================ */
+.math-block {
+  margin: 1em 0;
+  overflow-x: auto;
+  padding: 0.5em 0;
+}
+
+.math-inline {
+  vertical-align: middle;
+}
+
+.math-error {
+  color: #ef4444;
+  padding: 0.5em;
+  background: rgba(239, 68, 68, 0.05);
+  border-radius: 0.375rem;
+  border: 1px solid rgba(239, 68, 68, 0.1);
+}
+
+/* ============================================
+   SCROLLBAR STYLING
+   ============================================ */
+.chat-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chat-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-container::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 3px;
+}
+
+.chat-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+/* ============================================
+   RESPONSIVE
+   ============================================ */
+@media (max-width: 640px) {
+  .chat-message-row {
+    padding: 1rem 0;
+  }
+
+  .chat-message-inner {
+    gap: 0.75rem;
+  }
+
+  .chat-avatar {
+    width: 28px;
+    height: 28px;
+  }
+
+  .chat-name {
+    font-size: 13px;
+  }
+
+  .markdown-body {
+    font-size: 15px;
+  }
+
+  .chat-actions {
+    opacity: 1 !important;
+  }
+}

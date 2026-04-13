@@ -1,0 +1,35 @@
+{
+  "name": "ai-saas-backend",
+  "version": "1.0.0",
+  "description": "AI SaaS Backend - Builder Service",
+  "main": "server.ts",
+  "scripts": {
+    "dev": "tsx server.ts",
+    "start": "node --loader ts-node/esm server.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@clerk/express": "^1.7.77",
+    "@clerk/react": "^6.1.2",
+    "@types/archiver": "^7.0.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.0.3",
+    "@types/pg": "^8.11.0",
+    "archiver": "^7.0.1",
+    "axios": "^1.14.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "openai": "^4.104.0",
+    "pg": "^8.13.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
+  }
+}
