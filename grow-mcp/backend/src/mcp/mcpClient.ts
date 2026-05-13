@@ -147,55 +147,81 @@ export async function getMCPTools(): Promise<MCPTool[]> {
 
 /**
  * Execute a tool on the MCP server.
+ * Retries once after a full reconnect on common mcp-remote transport failures
+ * (e.g. "SSE stream disconnected: TypeError: terminated").
  */
 export async function executeMCPTool(
     name: string,
     args: Record<string, unknown>
 ): Promise<MCPToolResult> {
-    const client = await getMCPClient();
+    for (let attempt = 0; attempt < 2; attempt++) {
+        const client = await getMCPClient();
 
-    if (!client) {
-        return {
-            content: [{ type: "text", text: "MCP not connected. Using stub mode." }],
-            isError: true,
-        };
+        if (!client) {
+            return {
+                content: [{ type: "text", text: "MCP not connected. Using stub mode." }],
+                isError: true,
+            };
+        }
+
+        console.log(`[MCP] Calling tool: ${name}`, JSON.stringify(args));
+
+        try {
+            const result = await client.callTool({
+                name,
+                arguments: args,
+            });
+
+            const content = (result.content as MCPToolResult["content"]) ?? [];
+            console.log(
+                `[MCP] Tool ${name} returned:`,
+                content.map((c) => {
+                    if (c.type === "text" && "text" in c) {
+                        return (c.text as string).substring(0, 100);
+                    }
+                    return c.type;
+                }).join(", ")
+            );
+
+            return {
+                content,
+                isError: result.isError as boolean | undefined,
+            };
+        } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            const transient = /terminated|disconnected|disconnect|ECONNRESET|ETIMEDOUT|\bSSE\b/i.test(
+                msg
+            );
+            if (attempt === 0 && transient) {
+                console.warn(
+                    `[MCP] Transient MCP transport error while calling ${name} — reconnecting once:`,
+                    msg
+                );
+                await disconnectMCP();
+                continue;
+            }
+            console.error(`[MCP] Tool ${name} failed:`, error);
+            return {
+                content: [
+                    {
+                        type: "text",
+                        text: `Error calling ${name}: ${msg}`,
+                    },
+                ],
+                isError: true,
+            };
+        }
     }
 
-    console.log(`[MCP] Calling tool: ${name}`, JSON.stringify(args));
-
-    try {
-        const result = await client.callTool({
-            name,
-            arguments: args,
-        });
-
-        const content = (result.content as MCPToolResult["content"]) ?? [];
-        console.log(
-            `[MCP] Tool ${name} returned:`,
-            content.map((c) => {
-                if (c.type === "text" && "text" in c) {
-                    return (c.text as string).substring(0, 100);
-                }
-                return c.type;
-            }).join(", ")
-        );
-
-        return {
-            content,
-            isError: result.isError as boolean | undefined,
-        };
-    } catch (error) {
-        console.error(`[MCP] Tool ${name} failed:`, error);
-        return {
-            content: [
-                {
-                    type: "text",
-                    text: `Error calling ${name}: ${error instanceof Error ? error.message : String(error)}`,
-                },
-            ],
-            isError: true,
-        };
-    }
+    return {
+        content: [
+            {
+                type: "text",
+                text: `Error calling ${name}: failed after reconnect retry`,
+            },
+        ],
+        isError: true,
+    };
 }
 
 /**

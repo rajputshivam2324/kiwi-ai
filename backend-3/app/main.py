@@ -60,7 +60,7 @@ settings = get_settings()
 async def startup_event():
     """Initialize services on startup"""
     logger.info("Starting arXiv RAG Chatbot API v2.0")
-    logger.info(f"Model: {settings.model_name}")
+    logger.info(f"LLM: {settings.llm_model}")
     logger.info(f"ChromaDB path: {settings.chroma_db_path}")
     
     # Initialize database tables

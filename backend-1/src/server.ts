@@ -16,8 +16,11 @@ const __dirname = path.dirname(__filename);
 // Load .env from the same directory as this script
 dotenv.config({ path: path.join(__dirname, '.env') });
 
-// Debug: Log environment status
-console.log('Environment loaded. NVIDIA_API_KEY is', process.env.NVIDIA_API_KEY ? 'SET' : 'NOT SET');
+// Debug: Log environment status (Gemini accepts GEMINI_API_KEY or GOOGLE_API_KEY)
+console.log(
+    'Environment loaded. Gemini API key is',
+    process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY ? 'SET' : 'NOT SET'
+);
 console.log('CLERK_SECRET_KEY is', process.env.CLERK_SECRET_KEY ? 'SET' : 'NOT SET');
 console.log('DATABASE_URL is', process.env.DATABASE_URL ? 'SET' : 'NOT SET');
 
@@ -46,6 +49,26 @@ app.use((req, res, next) => {
 
 // Initialize Clerk middleware
 app.use(clerkAuth);
+
+const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+const GEMINI_OPENAI_BASE_URL =
+    process.env.GEMINI_BASE_URL ?? "https://generativelanguage.googleapis.com/v1beta/openai/";
+
+function getGeminiApiKey(): string | undefined {
+    return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+}
+
+function createGeminiOpenAI(timeoutMs?: number): OpenAI {
+    const apiKey = getGeminiApiKey();
+    if (!apiKey) {
+        throw new Error("GEMINI_API_KEY or GOOGLE_API_KEY is not set in environment variables");
+    }
+    return new OpenAI({
+        apiKey,
+        baseURL: GEMINI_OPENAI_BASE_URL,
+        ...(timeoutMs != null ? { timeout: timeoutMs } : {}),
+    });
+}
 
 const WORKSPACES_DIR = path.join(__dirname, "workspaces");
 
@@ -148,15 +171,11 @@ const generateProject = async (
 ) => {
     console.log('Starting project generation for job:', job.id, existingFiles ? '(follow-up)' : '(new)');
 
-    if (!process.env.NVIDIA_API_KEY) {
-        throw new Error('NVIDIA_API_KEY is not set in environment variables');
+    if (!getGeminiApiKey()) {
+        throw new Error('GEMINI_API_KEY or GOOGLE_API_KEY is not set in environment variables');
     }
 
-    const openai = new OpenAI({
-        apiKey: process.env.NVIDIA_API_KEY,
-        baseURL: 'https://integrate.api.nvidia.com/v1',
-        timeout: 120000, // 2 minute timeout
-    });
+    const openai = createGeminiOpenAI(120000);
 
     let systemPrompt: string;
     let userContent: string;
@@ -202,7 +221,7 @@ Rules:
 RESPOND WITH ONLY THE JSON OBJECT. NO OTHER TEXT.`;
     }
 
-    // Retry logic for NVIDIA API (handles 504 gateway timeouts)
+    // Retry logic for Gemini API (handles transient errors)
     const MAX_RETRIES = 3;
     let responseText = '';
     let lastError: Error | null = null;
@@ -211,13 +230,13 @@ RESPOND WITH ONLY THE JSON OBJECT. NO OTHER TEXT.`;
         try {
             sendEvent('status', { step: attempt > 1 ? `Retrying AI generation (attempt ${attempt}/${MAX_RETRIES})...` : 'Generating code with AI...', progress: 20 });
             console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-            console.log(`🚀 Calling NVIDIA Kimi K2.5 API (attempt ${attempt}/${MAX_RETRIES})...`);
+            console.log(`🚀 Calling Gemini (${GEMINI_MODEL}) (attempt ${attempt}/${MAX_RETRIES})...`);
             console.log('⏱️  Start time:', new Date().toLocaleTimeString());
 
             const startTime = Date.now();
 
             const stream = await openai.chat.completions.create({
-                model: "moonshotai/kimi-k2-instruct-0905",
+                model: GEMINI_MODEL,
                 messages: [
                     { role: "system", content: systemPrompt },
                     { role: "user", content: userContent }
@@ -925,15 +944,12 @@ app.post('/api/chat/message', requireAuth, async (req, res) => {
             return;
         }
 
-        if (!process.env.NVIDIA_API_KEY) {
-            res.status(500).json({ error: 'NVIDIA_API_KEY not configured' });
+        if (!getGeminiApiKey()) {
+            res.status(500).json({ error: 'GEMINI_API_KEY or GOOGLE_API_KEY not configured' });
             return;
         }
 
-        const openai = new OpenAI({
-            apiKey: process.env.NVIDIA_API_KEY,
-            baseURL: 'https://integrate.api.nvidia.com/v1',
-        });
+        const openai = createGeminiOpenAI();
 
         // Build conversation context
         const conversationHistory = (history || []).map((msg: any) => ({
@@ -961,63 +977,24 @@ Core principles:
 - If asked about building full apps/websites, suggest the user try Build mode for an interactive experience.
 - End with a brief follow-up suggestion or question when appropriate to keep the conversation flowing.`;
 
-        // Use fetch directly for NVIDIA-specific chat_template_kwargs support
-        const apiResponse = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${process.env.NVIDIA_API_KEY}`,
-                'Content-Type': 'application/json',
-                'Accept': 'text/event-stream'
-            },
-            body: JSON.stringify({
-                model: "moonshotai/kimi-k2-instruct-0905",
-                messages: [
-                    { role: "system", content: systemPrompt },
-                    ...conversationHistory,
-                    { role: "user", content: message }
-                ],
-                temperature: 0.6,
-                top_p: 0.9,
-                max_tokens: 4096,
-                stream: true
-            })
+        const stream = await openai.chat.completions.create({
+            model: GEMINI_MODEL,
+            messages: [
+                { role: "system", content: systemPrompt },
+                ...conversationHistory,
+                { role: "user", content: message }
+            ],
+            temperature: 0.6,
+            top_p: 0.9,
+            max_tokens: 4096,
+            stream: true,
         });
 
-        if (!apiResponse.ok) {
-            const errText = await apiResponse.text();
-            console.error('NVIDIA API error:', apiResponse.status, errText);
-            throw new Error(`NVIDIA API returned ${apiResponse.status}`);
-        }
-
-        const reader = apiResponse.body?.getReader();
-        if (!reader) throw new Error('No response body');
-
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            for (const line of lines) {
-                if (!line.startsWith('data: ')) continue;
-                const data = line.slice(6).trim();
-                if (data === '[DONE]') break;
-
-                try {
-                    const parsed = JSON.parse(data);
-                    const delta = parsed.choices?.[0]?.delta;
-                    // Only send final content, skip reasoning_content
-                    if (delta?.content) {
-                        res.write(`data: ${JSON.stringify({ content: delta.content })}\n\n`);
-                    }
-                } catch {
-                    // Skip unparseable chunks
-                }
+        for await (const chunk of stream) {
+            const delta = chunk.choices[0]?.delta as { content?: string; reasoning_content?: string } | undefined;
+            // Only stream final content (omit model reasoning / thinking deltas)
+            if (delta?.content) {
+                res.write(`data: ${JSON.stringify({ content: delta.content })}\n\n`);
             }
         }
 

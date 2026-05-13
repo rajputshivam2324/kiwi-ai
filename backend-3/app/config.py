@@ -1,11 +1,23 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, AliasChoices
 from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    # NVIDIA AI Endpoints
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # Google Gemini (chat / RAG LLM) — GOOGLE_API_KEY or GEMINI_API_KEY in .env
+    google_api_key: str = Field(
+        validation_alias=AliasChoices("GOOGLE_API_KEY", "GEMINI_API_KEY", "google_api_key"),
+    )
+    llm_model: str = "gemini-2.5-flash"
+
+    # NVIDIA AI Endpoints (embeddings only)
     nvidia_api_key: str
-    model_name: str = "moonshotai/kimi-k2-instruct-0905"
     temperature: float = 0.6
     top_p: float = 0.9
     max_tokens: int = 4096
@@ -24,10 +36,6 @@ class Settings(BaseSettings):
     # API Config
     api_host: str = "0.0.0.0"
     api_port: int = 8000
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
 
 
 @lru_cache()

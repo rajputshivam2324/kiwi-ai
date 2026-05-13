@@ -10,10 +10,17 @@ loadEnv({ path: localEnv }); // backend/.env overrides
 
 export const config = {
   port: Number(process.env.PORT) || 4000,
-  nvidia: {
-    apiKey: process.env.NVIDIA_API_KEY,
-    baseURL: process.env.NVIDIA_BASE_URL,
-    model: process.env.NVIDIA_MODEL ?? "moonshotai/kimi-k2-thinking",
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY,
+    baseURL: process.env.GEMINI_BASE_URL ?? "https://generativelanguage.googleapis.com/v1beta/openai/",
+    model: process.env.GEMINI_MODEL ?? "gemini-2.5-flash",
+    /** Retries for 429 / 5xx on each chat.completions.create (streaming). */
+    maxRetries: Math.max(1, Number(process.env.GEMINI_MAX_RETRIES ?? 8)),
+    initialBackoffMs: Math.max(200, Number(process.env.GEMINI_BACKOFF_INITIAL_MS ?? 1500)),
+    maxBackoffMs: Math.max(1000, Number(process.env.GEMINI_BACKOFF_MAX_MS ?? 120_000)),
+    /** Pause before a follow-up Gemini call after tools run (reduces 429 bursts). */
+    toolRoundDelayMs: Math.max(0, Number(process.env.GEMINI_TOOL_ROUND_DELAY_MS ?? 600)),
+    maxToolResultChars: Math.max(8_000, Number(process.env.GEMINI_MAX_TOOL_RESULT_CHARS ?? 120_000)),
   },
   mcp: {
     /**

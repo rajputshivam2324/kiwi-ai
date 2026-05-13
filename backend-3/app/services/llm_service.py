@@ -1,4 +1,4 @@
-from langchain_nvidia_ai_endpoints import ChatNVIDIA
+from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config import get_settings
 from typing import Iterator, Dict, Any
 import logging
@@ -9,12 +9,12 @@ logger = logging.getLogger(__name__)
 class LLMService:
     def __init__(self):
         self.settings = get_settings()
-        self.client = ChatNVIDIA(
-            model=self.settings.model_name,
-            api_key=self.settings.nvidia_api_key,
+        self.client = ChatGoogleGenerativeAI(
+            model=self.settings.llm_model,
+            google_api_key=self.settings.google_api_key,
             temperature=self.settings.temperature,
             top_p=self.settings.top_p,
-            max_tokens=self.settings.max_tokens,
+            max_output_tokens=self.settings.max_tokens,
         )
     
     def invoke(self, messages: list) -> Dict[str, Any]:

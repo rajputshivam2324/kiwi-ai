@@ -64,7 +64,7 @@ chatRouter.post("/", async (req: Request, res: Response): Promise<void> => {
     const message = err instanceof Error ? err.message : "Chat failed";
     console.error("[SSE Stream Error]:", message);
     if (!res.headersSent) {
-      const status = message.includes("NVIDIA_API_KEY") ? 503 : 500;
+      const status = message.includes("GEMINI_API_KEY") ? 503 : 500;
       res.status(status).json({ error: message });
     } else {
       res.write(`data: {"error": ${JSON.stringify(message)}}\n\n`);

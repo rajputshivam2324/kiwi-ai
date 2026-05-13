@@ -41,8 +41,8 @@ process.on("SIGTERM", shutdown);
 app.listen(config.port, async () => {
   console.log(`Backend listening on http://localhost:${config.port}`);
 
-  if (!config.nvidia?.apiKey) {
-    console.warn("⚠️  NVIDIA_API_KEY is not set. Set it in .env to enable chat.");
+  if (!config.gemini?.apiKey) {
+    console.warn("⚠️  GEMINI_API_KEY is not set. Set it in .env to enable chat.");
   }
 
   if (config.mcp.useStubTools) {

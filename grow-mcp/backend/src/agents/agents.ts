@@ -48,13 +48,13 @@ Output Formatting Guidelines:
 - When referencing numbers or prices, provide a "Translation" or bottom-line takeaway below data points where helpful.
 - Avoid large, unformatted chunks of paragraph text. Favor lists and structured sections.`,
     allowedTools: [
-      "get_market_quote",
       "get_ltp",
-      "get_ohlc",
-      "get_historical_candles",
-      "get_top_gainers",
-      "get_top_losers",
-      "get_most_active",
+      "get_quotes_and_depth",
+      "fetch_historical_candle_data",
+      "fetch_market_movers_and_trending_stocks_funds",
+      "resolve_market_time_and_calendar",
+      "get_historical_candlestick_patterns",
+      "calculator",
     ],
   },
   {
@@ -72,7 +72,7 @@ Your role:
 - Help users discover and understand companies before investing
 
 Rules:
-- Use search_instruments to resolve user queries to exact symbols
+- Use curate_symbols (and screeners) to resolve user queries to symbols and segments
 - Always provide fundamental context, not just raw numbers
 - Structure company analysis with: Overview, Financials, Valuation, Risks
 - Never recommend buying or selling — just present the facts
@@ -85,10 +85,15 @@ Output Formatting Guidelines:
 - When referencing stock performance or fundamentals, provide a "Translation" or bottom-line takeaway below data points where helpful.
 - Avoid large, unformatted chunks of paragraph text. Favor lists and structured sections.`,
     allowedTools: [
-      "search_instruments",
-      "download_instruments",
-      "get_instrument_details",
-      "get_stock_fundamentals",
+      "curate_symbols",
+      "fetch_stocks_fundamental_data",
+      "fetch_fundamentals_screener",
+      "fetch_etf_screener",
+      "fetch_technical_screener",
+      "fetch_ipo_listings",
+      "fetch_ipo_details",
+      "get_mutualfund_details",
+      "calculator",
     ],
   },
   {
@@ -119,15 +124,13 @@ Output Formatting Guidelines:
 - When referencing exact indicator values (like RSI=75), provide a "Translation" or bottom-line takeaway below data points where helpful.
 - Avoid large, unformatted chunks of paragraph text. Favor lists and structured sections.`,
     allowedTools: [
-      "get_historical_candles",
-      "calculate_sma",
-      "calculate_ema",
-      "calculate_macd",
-      "calculate_rsi",
-      "calculate_bollinger_bands",
-      "calculate_adx",
-      "calculate_stochastic",
-      "calculate_williams_r",
+      "fetch_historical_candle_data",
+      "get_historical_technical_indicators",
+      "get_historical_candlestick_patterns",
+      "get_ltp",
+      "get_quotes_and_depth",
+      "resolve_market_time_and_calendar",
+      "calculator",
     ],
   },
   {
@@ -141,7 +144,7 @@ Output Formatting Guidelines:
 Your role:
 - Show current portfolio holdings with P&L
 - Display open intraday positions
-- Check order book, trade book, and order history
+- Show order details via MCP when the user asks about a specific order
 - Report available margins and balances
 - Help users understand their portfolio performance
 
@@ -160,13 +163,14 @@ Output Formatting Guidelines:
 - When referencing stock performance or P&L, provide a "Translation" or bottom-line takeaway below data points where helpful.
 - Avoid large, unformatted chunks of paragraph text. Favor lists and structured sections.`,
     allowedTools: [
-      "get_portfolio_holdings",
-      "get_positions",
-      "get_order_book",
-      "get_trade_book",
-      "get_order_history",
-      "get_order_status",
-      "get_available_margin",
+      "get_equity_portfolio_holdings",
+      "get_my_trading_positions_today",
+      "get_specific_stock_position",
+      "get_order_details",
+      "get_available_margin_details",
+      "calculate_equity_margin",
+      "calculate_fno_margin",
+      "calculator",
     ],
   },
   {
