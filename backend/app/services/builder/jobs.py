@@ -41,6 +41,12 @@ _idle_sweep_task: asyncio.Task | None = None
 def allocate_port() -> int:
     global _next_dev_port
     settings = get_settings()
+
+    # When we allow only one live preview at a time, keep Vite on a fixed port.
+    # This makes it much easier to reverse-proxy previews on production.
+    if settings.builder_max_live_previews <= 1:
+        return settings.preview_port_start
+
     if _next_dev_port is None:
         _next_dev_port = settings.preview_port_start
     port = _next_dev_port

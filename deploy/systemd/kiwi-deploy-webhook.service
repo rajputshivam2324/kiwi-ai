@@ -1,0 +1,21 @@
+[Unit]
+Description=Kiwi backend deploy webhook
+After=docker.service network.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/kiwi
+Environment=WEBHOOK_HOST=127.0.0.1
+Environment=WEBHOOK_PORT=8787
+Environment=DEPLOY_APP_DIR=/opt/kiwi
+Environment=DEPLOY_COMPOSE_FILE=docker-compose.ec2.yml
+Environment=DEPLOY_BACKEND_SERVICE=backend
+EnvironmentFile=-/opt/kiwi/webhook.env
+ExecStart=/usr/bin/python3 /opt/kiwi/webhook/kiwi_deploy_webhook.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

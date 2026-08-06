@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.config import get_settings
 from app.routers import builder, chat, finance, research
@@ -31,6 +32,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def _enabled_modules() -> list[str]:
+    modules = ["builder", "research"]
+    if settings.finance_available:
+        modules.append("finance")
+    return modules
 
 
 @asynccontextmanager
@@ -59,14 +67,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Research services init failed: %s", e)
 
-    # Groww MCP: connect in background so OAuth does not block HTTP startup
-    import asyncio
+    if settings.finance_available:
+        # Groww MCP: connect in background so OAuth does not block HTTP startup
+        import asyncio
 
-    mcp = get_mcp_client()
-    mcp.start_background_connect()
-    logger.info(
-        "Groww MCP connect started in background (complete OAuth in browser if prompted)"
-    )
+        mcp = get_mcp_client()
+        mcp.start_background_connect()
+        logger.info(
+            "Groww MCP connect started in background (complete OAuth in browser if prompted)"
+        )
+    else:
+        logger.info(
+            "Finance MCP disabled for environment=%s; finance endpoints return coming soon",
+            settings.app_env,
+        )
 
     start_idle_workspace_sweeper()
     logger.info(
@@ -80,7 +94,8 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down...")
     await stop_idle_workspace_sweeper()
     cleanup_all_dev_servers()
-    await disconnect_mcp()
+    if settings.finance_available:
+        await disconnect_mcp()
     await close_builder_pool()
     await close_research_pool()
 
@@ -106,6 +121,12 @@ app.include_router(chat.router)
 app.include_router(finance.router)
 app.include_router(research.router)
 
+Instrumentator(
+    should_group_status_codes=True,
+    should_ignore_untemplated=True,
+    excluded_handlers=["/metrics"],
+).instrument(app).expose(app, include_in_schema=False)
+
 # Static preview of generated workspaces
 ws = Path(settings.workspace_dir)
 ws.mkdir(parents=True, exist_ok=True)
@@ -118,7 +139,7 @@ async def unified_health():
         "status": "ok",
         "service": "kiwi-ai-unified",
         "version": "3.0.0",
-        "modules": ["builder", "research", "finance"],
+        "modules": _enabled_modules(),
     }
 
 

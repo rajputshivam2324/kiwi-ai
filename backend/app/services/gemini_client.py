@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from typing import Any, AsyncIterator, Callable, Optional
 
 from openai import APIError, AsyncOpenAI, OpenAI
+from prometheus_client import Counter, Histogram
 
 from app.config import get_settings
 
@@ -15,6 +17,24 @@ logger = logging.getLogger(__name__)
 
 _sync_client: OpenAI | None = None
 _async_client: AsyncOpenAI | None = None
+
+
+# ── Prometheus metrics ──────────────────────────────────────────────────────
+_GEMINI_ATTEMPTS_TOTAL = Counter(
+    "kiwi_gemini_attempts_total",
+    "Number of Gemini streaming attempts (including retries)",
+    ["model", "outcome"],  # outcome: success|retry|failure
+)
+_GEMINI_ATTEMPT_DURATION_SECONDS = Histogram(
+    "kiwi_gemini_attempt_duration_seconds",
+    "Duration of a single Gemini streaming attempt",
+    ["model", "outcome"],
+)
+_GEMINI_RETRIES_TOTAL = Counter(
+    "kiwi_gemini_retries_total",
+    "Number of Gemini retries scheduled",
+    ["model"],
+)
 
 
 def get_api_key() -> str:
@@ -126,14 +146,23 @@ async def stream_chat_with_retry(
         params["tools"] = tools
 
     for attempt in range(retries):
+        attempt_start = time.monotonic()
         try:
             stream = await client.chat.completions.create(**params)
             async for chunk in stream:
                 yield chunk
+            _GEMINI_ATTEMPTS_TOTAL.labels(model=model_name, outcome="success").inc()
+            _GEMINI_ATTEMPT_DURATION_SECONDS.labels(model=model_name, outcome="success").observe(
+                time.monotonic() - attempt_start
+            )
             return
         except Exception as err:
             last_err = err
             if not is_retryable_error(err) or attempt >= retries - 1:
+                _GEMINI_ATTEMPTS_TOTAL.labels(model=model_name, outcome="failure").inc()
+                _GEMINI_ATTEMPT_DURATION_SECONDS.labels(model=model_name, outcome="failure").observe(
+                    time.monotonic() - attempt_start
+                )
                 raise
             wait_ms = compute_backoff_ms(
                 attempt,
@@ -142,6 +171,13 @@ async def stream_chat_with_retry(
                 err,
             )
             status = getattr(err, "status_code", "unknown")
+
+            _GEMINI_ATTEMPTS_TOTAL.labels(model=model_name, outcome="retry").inc()
+            _GEMINI_RETRIES_TOTAL.labels(model=model_name).inc()
+            _GEMINI_ATTEMPT_DURATION_SECONDS.labels(model=model_name, outcome="retry").observe(
+                time.monotonic() - attempt_start
+            )
+
             logger.warning(
                 "Gemini transient error (%s); backoff %sms (retry %s/%s)",
                 status,

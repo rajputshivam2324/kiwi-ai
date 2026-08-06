@@ -110,9 +110,14 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = 60
 
     # API
+    app_env: str = Field(
+        default="development",
+        validation_alias=AliasChoices("ENVIRONMENT", "APP_ENV"),
+    )
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
+    finance_enabled: bool = Field(default=True, validation_alias="FINANCE_ENABLED")
 
     @property
     def gemini_api_key(self) -> str:
@@ -125,6 +130,12 @@ class Settings(BaseSettings):
     @property
     def mcp_args_list(self) -> list[str]:
         return [a.strip() for a in self.mcp_args.split(",") if a.strip()]
+
+    @property
+    def finance_available(self) -> bool:
+        if not self.finance_enabled:
+            return False
+        return self.app_env.lower() != "production"
 
 
 @lru_cache()

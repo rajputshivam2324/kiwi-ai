@@ -10,12 +10,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.config import get_settings
 from app.deps.rate_limit import rate_limit_dependency
 from app.services.finance.chat_loop import chat_stream
 from app.services.finance.mcp_client import get_mcp_tools
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["finance"])
+settings = get_settings()
 
 _in_flight: set[str] = set()
 
@@ -36,8 +38,25 @@ def _request_key(messages: list[FinanceMessage]) -> str:
     return f"{len(messages)}:{last.content[:200]}"
 
 
+def _coming_soon_payload() -> dict[str, object]:
+    return {
+        "status": "coming_soon",
+        "service": "finance",
+        "message": "Finance mode is not available in production yet. Coming soon.",
+        "enabled": False,
+    }
+
+
+def _ensure_finance_available() -> None:
+    if not settings.finance_available:
+        raise HTTPException(status_code=503, detail=_coming_soon_payload())
+
+
 @router.get("/health")
 async def finance_health():
+    if not settings.finance_available:
+        return _coming_soon_payload()
+
     from app.services.finance.mcp_client import get_mcp_client
 
     return {
@@ -49,6 +68,7 @@ async def finance_health():
 
 @router.get("/api/tools")
 async def list_tools():
+    _ensure_finance_available()
     try:
         tools = await get_mcp_tools()
         return {
@@ -64,6 +84,7 @@ async def finance_chat(
     body: FinanceChatBody,
     _: None = Depends(rate_limit_dependency),
 ):
+    _ensure_finance_available()
     request_key = _request_key(body.messages)
     if request_key and request_key in _in_flight:
         raise HTTPException(429, detail="Request already in progress. Please wait.")

@@ -1,7 +1,12 @@
 """Eval tests for finance router + schema helpers (no network)."""
 
 import inspect
+from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
+
+from app.routers import finance as finance_router
 from app.services.finance.agents.router import route_to_agent
 from app.services.finance.chat_loop import chat_stream
 from app.services.finance.schema_utils import (
@@ -85,3 +90,15 @@ def test_chat_stream_with_mocked_tools():
     assert inspect.isasyncgenfunction(chat_stream)
     assert inspect.iscoroutinefunction(list_tools)
     assert inspect.iscoroutinefunction(call_tool)
+
+
+def test_finance_router_coming_soon_when_disabled(monkeypatch):
+    monkeypatch.setattr(
+        finance_router,
+        "settings",
+        SimpleNamespace(finance_available=False),
+    )
+    with pytest.raises(HTTPException) as exc:
+        finance_router._ensure_finance_available()
+    assert exc.value.status_code == 503
+    assert exc.value.detail["status"] == "coming_soon"

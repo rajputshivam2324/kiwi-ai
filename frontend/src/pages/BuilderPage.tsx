@@ -17,6 +17,10 @@ export const BuilderPage = () => {
     const loadProjectId = location.state?.loadProjectId || null;
     const hasStartedRef = useRef(false);
 
+    // In production we can point previews to a reverse-proxied stable URL
+    // (so we don't have to expose dynamic ports like :5201/:5202).
+    const previewBaseUrl = import.meta.env.VITE_PREVIEW_BASE_URL as string | undefined;
+
     const [messages, setMessages] = useState<{ role: 'user' | 'assistant', content: string }[]>([]);
     const [currentPrompt, setCurrentPrompt] = useState('');
     const [isBuilding, setIsBuilding] = useState(false);
@@ -72,7 +76,11 @@ export const BuilderPage = () => {
             });
             if (res.ok) {
                 const data = await res.json();
-                setPreviewUrl(`http://localhost:${data.port}`);
+                setPreviewUrl(
+                    previewBaseUrl
+                        ? String(previewBaseUrl)
+                        : `http://localhost:${data.port}`
+                );
                 const evicted = Array.isArray(data.evicted) ? data.evicted.length : 0;
                 setBuildLogs(prev => [
                     ...prev,
@@ -259,7 +267,11 @@ export const BuilderPage = () => {
                 const fixNote = data.fixRounds ? ` (auto-fixed ${data.fixRounds} build issue${data.fixRounds > 1 ? 's' : ''})` : '';
 
                 if (previewReady) {
-                    setPreviewUrl(`http://localhost:${data.devPort}`);
+                    setPreviewUrl(
+                        previewBaseUrl
+                            ? String(previewBaseUrl)
+                            : `http://localhost:${data.devPort}`
+                    );
                     setMessages(prev => [...prev, {
                         role: 'assistant',
                         content: isFollowUp

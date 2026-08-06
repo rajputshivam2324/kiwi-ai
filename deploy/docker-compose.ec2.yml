@@ -1,0 +1,55 @@
+services:
+  backend:
+    image: ${BACKEND_IMAGE:?Set BACKEND_IMAGE in webhook.env or shell}
+    container_name: kiwi-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend.env
+    environment:
+      ENVIRONMENT: production
+      FINANCE_ENABLED: "false"
+      BUILDER_MAX_LIVE_PREVIEWS: "1"
+      PREVIEW_PORT_START: "5200"
+    ports:
+      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:5200:5200"
+    volumes:
+      - backend_workspaces:/app/workspaces
+      - backend_chroma:/app/data/chroma_db
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: kiwi-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      - backend
+
+  grafana:
+    image: grafana/grafana:11.1.4
+    container_name: kiwi-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana-provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "127.0.0.1:3001:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  backend_workspaces:
+  backend_chroma:
+  prometheus_data:
+  grafana_data:

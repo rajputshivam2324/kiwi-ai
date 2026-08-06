@@ -1,0 +1,13 @@
+.env
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+data/chroma_db
+workspaces
+node_modules
+dist
+build
+Dockerfile*
+README.md

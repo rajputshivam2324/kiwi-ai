@@ -187,6 +187,18 @@ See `backend/.env.example` for the full list.
 docker compose up --build
 ```
 
+## Deployment split (recommended)
+
+- Frontend (`frontend/`) → **Vercel** at `https://kiwiai.shivamio.in`
+- Backend (`backend/`) → **AWS EC2** + Docker + Nginx  
+  Full beginner guide: [`deploy/EC2_DEPLOYMENT.md`](deploy/EC2_DEPLOYMENT.md)
+
+| Host | Role |
+|------|------|
+| `api.kiwiai.shivamio.in` | FastAPI API + deploy webhook |
+| `preview.kiwiai.shivamio.in` | Live Vite preview |
+| `grafana.kiwiai.shivamio.in` | Observability UI |
+
 This starts:
 
 - Frontend
