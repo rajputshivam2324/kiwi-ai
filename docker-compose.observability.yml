@@ -1,0 +1,64 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: kiwi-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      ENVIRONMENT: production
+      FINANCE_ENABLED: "false"
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend_workspaces:/app/workspaces
+      - backend_chroma:/app/data/chroma_db
+    networks:
+      - kiwi
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: kiwi-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    volumes:
+      - ./backend/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - kiwi
+    depends_on:
+      - backend
+
+  grafana:
+    image: grafana/grafana:11.1.4
+    container_name: kiwi-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./backend/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3001:3000"
+    networks:
+      - kiwi
+    depends_on:
+      - prometheus
+
+networks:
+  kiwi:
+    driver: bridge
+
+volumes:
+  backend_workspaces:
+  backend_chroma:
+  prometheus_data:
+  grafana_data:

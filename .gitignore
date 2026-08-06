@@ -6,4 +6,3 @@ dist
 workspaces
 EC2_DEPLOYMENT.md
 deploy/README.md
-docker-compose.observability.yml
