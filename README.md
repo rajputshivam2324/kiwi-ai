@@ -83,64 +83,8 @@ Connect to Groww via MCP for portfolio analysis and trading.
 - "Compare Nifty 50 vs S&P 500."
 - "Should I rebalance my holdings?"
 
----
 
-## 🧱 Tech Stack
 
-### Frontend
-- React 19
-- Vite
-- Tailwind CSS
-- Clerk Authentication
-- Monaco Editor
-- Server-Sent Events (SSE)
-
-### Backend Services
-
-#### Builder Service (`backend-1`)
-- Node.js
-- Express 5
-- Google Gemini
-- Local filesystem project storage
-
-#### Research Service (`backend-3`)
-- Python
-- FastAPI
-- LangChain
-- ChromaDB
-- PostgreSQL
-- arXiv API
-
-#### Finance Service (`grow-mcp/backend`)
-- Node.js
-- Express
-- Google Gemini
-- Groww MCP
-- OAuth 2.0
-
-### Infrastructure
-- PostgreSQL 16 (Docker)
-- ChromaDB (SQLite)
-- Workspace filesystem
-
----
-
-## 📁 Repository Structure
-
-```text
-kiwi-ai/
-├── HLD.md                    # Interview Mermaid HLD
-├── backend/                  # ★ Unified FastAPI (Builder + Research + Finance)
-│   ├── app/
-│   ├── evals/                # Offline unit/evals (mock LLM / router)
-│   └── docs/HLD.md
-├── backend-1/                # Legacy Node builder (reference)
-├── backend-3/                # Legacy FastAPI research (reference)
-├── frontend/                 # React application
-└── grow-mcp/                 # Legacy Node finance (reference)
-```
-
----
 
 ## ⚙️ Prerequisites
 
@@ -181,33 +125,7 @@ MCP_USE_STUB_TOOLS=false
 See `backend/.env.example` for the full list.
 ---
 
-## 🐳 Running with Docker Compose
 
-```bash
-docker compose up --build
-```
-
-## Deployment split (recommended)
-
-- Frontend (`frontend/`) → **Vercel** at `https://kiwiai.shivamio.in`
-- Backend (`backend/`) → **AWS EC2** + Docker + Nginx  
-  Full beginner guide: [`deploy/EC2_DEPLOYMENT.md`](deploy/EC2_DEPLOYMENT.md)
-
-| Host | Role |
-|------|------|
-| `api.kiwiai.shivamio.in` | FastAPI API + deploy webhook |
-| `preview.kiwiai.shivamio.in` | Live Vite preview |
-| `grafana.kiwiai.shivamio.in` | Observability UI |
-
-This starts:
-
-- Frontend
-- Builder Service
-- Research Service
-- Finance Service
-- PostgreSQL
-
----
 
 ## ▶️ Running Services Individually
 
@@ -279,13 +197,7 @@ Legacy ports (4000 / 4001 / 8005) only if you run the old services separately.
 
 ---
 
-## 📚 Documentation
 
-- [`HLD.md`](HLD.md) — Mermaid HLD for interviews (system context, builder pipeline, RAG, finance agents)
-- [`backend/docs/HLD.md`](backend/docs/HLD.md) — same doc next to the unified server
-- [`backend/README.md`](backend/README.md) — run / eval instructions
-
----
 
 ## 🗺️ Roadmap
 
