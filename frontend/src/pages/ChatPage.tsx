@@ -27,10 +27,8 @@ import {
 
 import { FinanceCard } from '../components/FinanceCard';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
+import { API_URL, authHeaders } from '../lib/api';
 import '../styles/chat-ui.css';
-
-const GROW_MCP_URL = 'http://localhost:4001';
-const ARXIV_API_URL = 'http://localhost:8005';
 
 type Mode = 'normal' | 'build' | 'arxiv' | 'finance';
 
@@ -103,7 +101,7 @@ export const ChatPage = () => {
 
     const checkMcpHealth = async () => {
         try {
-            const res = await fetch(`${GROW_MCP_URL}/health`);
+            const res = await fetch(`${API_URL}/health`);
             if (res.ok) {
                 setMcpOnline(true);
             }
@@ -115,7 +113,7 @@ export const ChatPage = () => {
 
     const checkArxivHealth = async () => {
         try {
-            const res = await fetch(`${ARXIV_API_URL}/`);
+            const res = await fetch(`${API_URL}/`);
             if (res.ok) {
                 setArxivOnline(true);
             }
@@ -127,10 +125,8 @@ export const ChatPage = () => {
 
     const fetchProjects = async () => {
         try {
-            const token = await getToken();
-            const res = await fetch('http://localhost:4000/api/build/projects', {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const headers = await authHeaders(getToken);
+            const res = await fetch(`${API_URL}/api/build/projects`, { headers });
             if (res.ok) {
                 const data = await res.json();
                 setRecentProjects(data.projects.slice(0, 5) || []);
@@ -140,10 +136,29 @@ export const ChatPage = () => {
         }
     };
 
+    const deleteProject = async (projectId: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!confirm('Delete this project? Source and preview files will be removed.')) {
+            return;
+        }
+        try {
+            const headers = await authHeaders(getToken);
+            const res = await fetch(`${API_URL}/api/build/projects/${projectId}`, {
+                method: 'DELETE',
+                headers,
+            });
+            if (res.ok) {
+                await fetchProjects();
+            }
+        } catch (err) {
+            console.error('Failed to delete project', err);
+        }
+    };
+
     const fetchArxivConversations = useCallback(async () => {
         if (!user?.id) return;
         try {
-            const res = await fetch(`${ARXIV_API_URL}/conversations?user_id=${user.id}`);
+            const res = await fetch(`${API_URL}/conversations?user_id=${user.id}`);
             if (res.ok) {
                 const data = await res.json();
                 setArxivConversations(data.conversations || []);
@@ -155,7 +170,7 @@ export const ChatPage = () => {
 
     const loadConversation = async (conversationId: string) => {
         try {
-            const res = await fetch(`${ARXIV_API_URL}/conversations/${conversationId}/messages`);
+            const res = await fetch(`${API_URL}/conversations/${conversationId}/messages`);
             if (!res.ok) throw new Error('Failed to load conversation');
             const data = await res.json();
 
@@ -179,7 +194,7 @@ export const ChatPage = () => {
     const deleteArxivConversation = async (conversationId: string, e: React.MouseEvent) => {
         e.stopPropagation();
         try {
-            await fetch(`${ARXIV_API_URL}/conversations/${conversationId}`, {
+            await fetch(`${API_URL}/conversations/${conversationId}`, {
                 method: 'DELETE'
             });
             setArxivConversations(prev => prev.filter(c => c.id !== conversationId));
@@ -223,7 +238,7 @@ export const ChatPage = () => {
                     content: msg.content
                 }));
 
-            const res = await fetch(`${GROW_MCP_URL}/api/chat`, {
+            const res = await fetch(`${API_URL}/api/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ messages: mcpMessages })
@@ -298,14 +313,14 @@ export const ChatPage = () => {
             setMessages(prev => [...prev, {
                 id: (Date.now() + 1).toString(),
                 role: 'assistant',
-                content: 'Sorry, I encountered an error while processing your finance request. Make sure the grow-mcp backend is running on port 4001.'
+                content: 'Sorry, I encountered an error with the finance assistant. Ensure the unified backend is running and Groww MCP is connected.'
             }]);
         }
     };
 
     const handleArxivSubmit = async (userMessage: Message) => {
         try {
-            const res = await fetch(`${ARXIV_API_URL}/chat/stream`, {
+            const res = await fetch(`${API_URL}/chat/stream`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -401,7 +416,7 @@ export const ChatPage = () => {
             setMessages(prev => [...prev, {
                 id: (Date.now() + 1).toString(),
                 role: 'assistant',
-                content: 'Sorry, I encountered an error connecting to the arXiv research backend. Make sure it\'s running on port 8000.',
+                content: 'Sorry, I could not reach the research service. Ensure the unified backend is running on port 8000.',
             }]);
         }
     };
@@ -409,13 +424,10 @@ export const ChatPage = () => {
 
     const handleNormalSubmit = async (userMessage: Message) => {
         try {
-            const token = await getToken();
-            const res = await fetch('http://localhost:4000/api/chat/message', {
+            const headers = await authHeaders(getToken);
+            const res = await fetch(`${API_URL}/api/chat/message`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
+                headers,
                 body: JSON.stringify({
                     message: userMessage.content,
                     history: messages
@@ -648,10 +660,24 @@ export const ChatPage = () => {
                                     <button
                                         key={project.id}
                                         onClick={() => navigate('/builder', { state: { loadProjectId: project.id } })}
-                                        className="w-full px-3 py-2.5 rounded-xl text-zinc-500 text-[15px] text-left hover:bg-zinc-200/50 hover:text-zinc-700 transition-all flex justify-between items-center"
+                                        className="w-full px-3 py-2.5 rounded-xl text-zinc-500 text-[15px] text-left hover:bg-zinc-200/50 hover:text-zinc-700 transition-all flex justify-between items-center group"
                                         title={project.name}
                                     >
                                         <span className="truncate flex-1">{project.name}</span>
+                                        <span
+                                            role="button"
+                                            tabIndex={0}
+                                            onClick={(e) => deleteProject(project.id, e)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' || e.key === ' ') {
+                                                    deleteProject(project.id, e as unknown as React.MouseEvent);
+                                                }
+                                            }}
+                                            className="p-1 rounded-md opacity-0 group-hover:opacity-100 hover:bg-zinc-200/50 hover:text-red-500 transition-all flex-shrink-0"
+                                            title="Delete project"
+                                        >
+                                            <Trash2 className="w-3 h-3" />
+                                        </span>
                                     </button>
                                 ))
                             )}

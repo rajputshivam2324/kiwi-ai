@@ -14,26 +14,19 @@ Kiwi AI combines a modern React frontend with specialized backend services to de
 
 ## 🏗️ Architecture Overview
 
+> **Unified backend:** All three former services now run as one FastAPI app on port **8000**.  
+> Interview HLD (Mermaid): [`HLD.md`](HLD.md) · [`backend/docs/HLD.md`](backend/docs/HLD.md)
+
 ```text
-Frontend (React + Vite + Tailwind)
+Frontend (React + Vite + Tailwind + Clerk)
         │
-        ├── Clerk Authentication
-        │
-        ├── Builder Service (Node.js + Express)
-        │       ├── Google Gemini
-        │       ├── Workspace Filesystem
-        │       └── PostgreSQL
-        │
-        ├── Research Service (FastAPI + LangChain)
-        │       ├── arXiv API
-        │       ├── ChromaDB
-        │       ├── PostgreSQL
-        │       └── Google Gemini
-        │
-        └── Finance Service (Node.js + Express)
-                ├── Groww MCP
-                └── Google Gemini
+        └── Unified Backend (FastAPI :8000)
+                ├── Builder module      → Gemini + workspaces + Postgres
+                ├── Research module     → arXiv + ChromaDB + Gemini + Postgres
+                └── Finance module      → Groww MCP + multi-agent Gemini loop
 ```
+
+Legacy folders (`backend-1`, `backend-3`, `grow-mcp`) remain for reference; prefer `backend/`.
 
 ---
 
@@ -136,14 +129,15 @@ Connect to Groww via MCP for portfolio analysis and trading.
 
 ```text
 kiwi-ai/
-├── backend-1/
-│   └── src/                  # AI Builder service
-├── backend-3/                # Research RAG service
+├── HLD.md                    # Interview Mermaid HLD
+├── backend/                  # ★ Unified FastAPI (Builder + Research + Finance)
+│   ├── app/
+│   ├── evals/                # Offline unit/evals (mock LLM / router)
+│   └── docs/HLD.md
+├── backend-1/                # Legacy Node builder (reference)
+├── backend-3/                # Legacy FastAPI research (reference)
 ├── frontend/                 # React application
-├── grow-mcp/
-│   └── backend/              # Finance service
-├── docker-compose.yml
-└── README.md
+└── grow-mcp/                 # Legacy Node finance (reference)
 ```
 
 ---
@@ -169,37 +163,22 @@ Create `.env` files for each service.
 ### Frontend (`frontend/.env`)
 ```env
 VITE_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
-VITE_BUILDER_API_URL=http://localhost:4000
-VITE_FINANCE_API_URL=http://localhost:4001
-VITE_RESEARCH_API_URL=http://localhost:8005
 ```
 
-### Builder Service (`backend-1/.env`)
+Frontend API bases point at `http://localhost:8000` (unified backend).
+
+### Unified Backend (`backend/.env`)
 ```env
-PORT=4000
+API_PORT=8000
 GEMINI_API_KEY=your_gemini_api_key
-DATABASE_URL=your_database_url
-WORKSPACE_DIR=./workspaces
+DATABASE_URL=postgresql://kiwi:kiwi_secret_2024@localhost:5432/kiwi_ai
+CHROMA_DB_PATH=./data/chroma_db
 CLERK_SECRET_KEY=your_clerk_secret_key
+CLERK_JWKS_URL=https://your-clerk-domain/.well-known/jwks.json
+MCP_USE_STUB_TOOLS=false
 ```
 
-### Research Service (`backend-3/.env`)
-```env
-PORT=8005
-GEMINI_API_KEY=your_gemini_api_key
-DATABASE_URL=postgresql://postgres:password@localhost:5432/kiwi_ai
-CHROMA_DB_DIR=./chroma_db
-```
-
-### Finance Service (`grow-mcp/backend/.env`)
-```env
-PORT=4001
-GEMINI_API_KEY=your_gemini_api_key
-GROWW_CLIENT_ID=your_groww_client_id
-GROWW_CLIENT_SECRET=your_groww_client_secret
-GROWW_REDIRECT_URI=http://localhost:4001/callback
-```
-
+See `backend/.env.example` for the full list.
 ---
 
 ## 🐳 Running with Docker Compose
@@ -227,35 +206,17 @@ npm install
 npm run dev
 ```
 
-### Builder Service
+### Unified Backend (recommended)
 ```bash
-cd backend-1
-npm install
-npm run dev
-```
-
-### Research Service
-```bash
-cd backend-3
+cd backend
 python -m venv venv
-
-# Linux/macOS
-source venv/bin/activate
-
-# Windows
-# venv\Scripts\activate
-
+source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8005
+cp .env.example .env       # fill keys
+uvicorn app.main:app --reload --port 8000
 ```
 
-### Finance Service
-```bash
-cd grow-mcp/backend
-npm install
-npm run dev
-```
-
+Legacy services (`backend-1`, `backend-3`, `grow-mcp`) remain as reference only.
 ---
 
 ## 🌐 Default Ports
@@ -263,11 +224,10 @@ npm run dev
 | Service | Port |
 |-------|-----:|
 | Frontend | 5173 |
-| Builder Service | 4000 |
-| Finance Service | 4001 |
-| Research Service | 8005 |
+| **Unified Backend** | **8000** |
 | PostgreSQL | 5432 |
 
+Legacy ports (4000 / 4001 / 8005) only if you run the old services separately.
 ---
 
 ## 🔄 Application Flows
@@ -309,9 +269,9 @@ npm run dev
 
 ## 📚 Documentation
 
-- `arch.mmd` — Mermaid source for architecture diagram
-- `kiwi-ai-architecture.png` — Rendered architecture image
-- `system_design_hld.html` — Detailed high-level design document
+- [`HLD.md`](HLD.md) — Mermaid HLD for interviews (system context, builder pipeline, RAG, finance agents)
+- [`backend/docs/HLD.md`](backend/docs/HLD.md) — same doc next to the unified server
+- [`backend/README.md`](backend/README.md) — run / eval instructions
 
 ---
 

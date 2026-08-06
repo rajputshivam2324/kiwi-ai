@@ -1,16 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowUp, Loader2, Code, Eye, FileCode, Folder, ChevronRight, ChevronDown } from 'lucide-react';
+import { ArrowUp, Loader2, Code, Eye, FileCode, Folder, ChevronRight, ChevronDown, Trash2 } from 'lucide-react';
 import { useAuth, UserButton } from '@clerk/clerk-react';
 import { CodeEditor } from '../components/CodeEditor';
 import { Preview } from '../components/Preview';
 import { FileTree } from '../components/FileTree';
 import { DownloadButton } from '../components/DownloadButton';
 import type { FileNode } from '../components/FileTree';
-
-// Updated API URL to backend-1
-const API_URL = 'http://localhost:4000';
+import { API_URL, authHeaders } from '../lib/api';
 
 export const BuilderPage = () => {
     const { getToken, isLoaded } = useAuth();
@@ -53,10 +51,8 @@ export const BuilderPage = () => {
 
     const fetchProjects = async () => {
         try {
-            const token = await getToken();
-            const res = await fetch(`${API_URL}/api/build/projects`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const headers = await authHeaders(getToken);
+            const res = await fetch(`${API_URL}/api/build/projects`, { headers });
             if (res.ok) {
                 const data = await res.json();
                 setProjects(data.projects || []);
@@ -69,16 +65,25 @@ export const BuilderPage = () => {
     const startDevServerForProject = async (id: string) => {
         setIsStartingDev(true);
         try {
-            const token = await getToken();
+            const headers = await authHeaders(getToken);
             const res = await fetch(`${API_URL}/api/build/start-dev/${id}`, {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
+                headers,
             });
             if (res.ok) {
                 const data = await res.json();
                 setPreviewUrl(`http://localhost:${data.port}`);
+                const evicted = Array.isArray(data.evicted) ? data.evicted.length : 0;
+                setBuildLogs(prev => [
+                    ...prev,
+                    `✅ Preview running on port ${data.port}`,
+                    ...(evicted
+                        ? [`ℹ️ Freed disk from ${evicted} other live preview(s) (budget limit)`]
+                        : []),
+                ]);
             } else {
                 setPreviewUrl(null);
+                setBuildLogs(prev => [...prev, '❌ Failed to start preview server']);
             }
         } catch (e) {
             console.error("Failed to restart dev server", e);
@@ -88,15 +93,45 @@ export const BuilderPage = () => {
         }
     };
 
+    const deleteProject = async (projectId: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!confirm('Delete this project? Source and preview files will be removed.')) {
+            return;
+        }
+        try {
+            const headers = await authHeaders(getToken);
+            const res = await fetch(`${API_URL}/api/build/projects/${projectId}`, {
+                method: 'DELETE',
+                headers,
+            });
+            if (!res.ok) {
+                setBuildLogs(prev => [...prev, '❌ Failed to delete project']);
+                return;
+            }
+            if (jobId === projectId) {
+                setJobId(null);
+                setFiles([]);
+                setSelectedFile(null);
+                setFileContent('// Select a file to view code');
+                setPreviewUrl(null);
+                setMessages([]);
+                setBuildLogs([]);
+                setStreamingFiles([]);
+            }
+            await fetchProjects();
+            setBuildLogs(prev => [...prev, '🗑️ Project deleted (DB + disk cleaned)']);
+        } catch (err) {
+            console.error('Failed to delete project', err);
+        }
+    };
+
     const loadProject = async (projectId: string) => {
         setJobId(projectId);
 
         // Also fetch project details to get prompt
         try {
-            const token = await getToken();
-            const res = await fetch(`${API_URL}/api/build/projects/${projectId}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const headers = await authHeaders(getToken);
+            const res = await fetch(`${API_URL}/api/build/projects/${projectId}`, { headers });
             if (res.ok) {
                 const data = await res.json();
                 setMessages([{ role: 'user', content: data.project.prompt }]);
@@ -109,6 +144,27 @@ export const BuilderPage = () => {
         setActiveTab('code');
         startDevServerForProject(projectId);
     };
+
+    // Keep idle TTL from killing an open preview session
+    useEffect(() => {
+        if (!jobId || !previewUrl || !isLoaded) return;
+        let cancelled = false;
+        const beat = async () => {
+            try {
+                const headers = await authHeaders(getToken);
+                if (cancelled) return;
+                await fetch(`${API_URL}/api/build/status/${jobId}`, { headers });
+            } catch {
+                /* ignore */
+            }
+        };
+        beat();
+        const id = window.setInterval(beat, 120_000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(id);
+        };
+    }, [jobId, previewUrl, isLoaded, getToken]);
 
     // Handle initial routing (new prompt or loading existing project)
     useEffect(() => {
@@ -148,18 +204,15 @@ export const BuilderPage = () => {
 
         try {
             const token = await getToken();
+            const headers = await authHeaders(getToken);
 
-            // If jobId exists, use follow-up endpoint; otherwise create new project
             const endpoint = isFollowUp
                 ? `${API_URL}/api/build/chat/${jobId}`
                 : `${API_URL}/api/build/chat`;
 
             const res = await fetch(endpoint, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
+                headers,
                 body: JSON.stringify({ prompt })
             });
 
@@ -191,29 +244,45 @@ export const BuilderPage = () => {
                 setBuildLogs(prev => [...prev, `📄 ${isFollowUp ? 'Updated' : 'Created'}: ${data.path}`]);
             });
 
+            eventSource.addEventListener('build_error', (event) => {
+                const data = JSON.parse((event as MessageEvent).data);
+                const snippet = (data.message || '').slice(0, 300);
+                setBuildLogs(prev => [...prev, `⚠️ Build issue detected — auto-fixing…`, snippet]);
+            });
+
             eventSource.addEventListener('complete', async (event) => {
-                const data = JSON.parse(event.data);
+                const data = JSON.parse((event as MessageEvent).data);
                 eventSource.close();
                 setIsBuilding(false);
-                setMessages(prev => [...prev, {
-                    role: 'assistant',
-                    content: isFollowUp
-                        ? "Project updated! Check the preview for the changes."
-                        : "Build completed! You can now explore the files and preview the app."
-                }]);
 
-                // Fetch final file structure
+                const previewReady = Boolean(data.previewReady && data.devPort);
+                const fixNote = data.fixRounds ? ` (auto-fixed ${data.fixRounds} build issue${data.fixRounds > 1 ? 's' : ''})` : '';
+
+                if (previewReady) {
+                    setPreviewUrl(`http://localhost:${data.devPort}`);
+                    setMessages(prev => [...prev, {
+                        role: 'assistant',
+                        content: isFollowUp
+                            ? `Project updated and preview is live${fixNote}!`
+                            : `Build complete — preview is live${fixNote}! Explore the code or open Preview.`,
+                    }]);
+                    setBuildLogs(prev => [...prev, `✅ Preview ready on port ${data.devPort}`]);
+                    setTimeout(() => setActiveTab('preview'), 500);
+                } else {
+                    setPreviewUrl(null);
+                    setMessages(prev => [...prev, {
+                        role: 'assistant',
+                        content: isFollowUp
+                            ? 'Files updated but preview could not start. Use the chat to describe the error, or click Refresh in Preview after fixing.'
+                            : 'Code generated but preview failed verification. Ask me to fix build errors, or try "Restart Preview" from the Preview tab.',
+                    }]);
+                    if (data.buildWarning) {
+                        setBuildLogs(prev => [...prev, `❌ ${String(data.buildWarning).slice(0, 400)}`]);
+                    }
+                }
+
                 await fetchFiles(activeJobId);
-
-                // Set preview URL to the static folder directly
-                setPreviewUrl(`http://localhost:${data.devPort || 5173}`);
-                setBuildLogs(prev => [...prev, `✅ ${isFollowUp ? 'Update' : 'Build'} complete! Preview ready.`]);
-
-                // Fetch projects to show complete state
                 fetchProjects();
-
-                // Auto-switch to preview after build
-                setTimeout(() => setActiveTab('preview'), 500);
             });
 
             eventSource.addEventListener('error', (event: Event) => {
@@ -250,10 +319,8 @@ export const BuilderPage = () => {
 
     const fetchFiles = async (id: string) => {
         try {
-            const token = await getToken();
-            const res = await fetch(`${API_URL}/api/build/files/${id}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const headers = await authHeaders(getToken);
+            const res = await fetch(`${API_URL}/api/build/files/${id}`, { headers });
             if (res.ok) {
                 const data = await res.json();
                 setFiles(data.files);
@@ -293,11 +360,9 @@ export const BuilderPage = () => {
         // Otherwise fetch from server
         if (!jobId) return;
         try {
-            const token = await getToken();
+            const headers = await authHeaders(getToken);
             const encodedPath = path.split('/').map(seg => encodeURIComponent(seg)).join('/');
-            const res = await fetch(`${API_URL}/api/build/files/${jobId}/${encodedPath}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const res = await fetch(`${API_URL}/api/build/files/${jobId}/${encodedPath}`, { headers });
             if (res.ok) {
                 const data = await res.json();
                 setFileContent(data.content);
@@ -384,25 +449,38 @@ export const BuilderPage = () => {
                                         </div>
                                     ) : (
                                         projects.map((project) => (
-                                            <button
+                                            <div
                                                 key={project.id}
-                                                onClick={() => loadProject(project.id)}
-                                                className={`w-full flex items-center gap-2 px-4 py-2 rounded-md text-sm transition-colors ${jobId === project.id
+                                                className={`w-full flex items-center gap-1 px-2 py-1 rounded-md text-sm transition-colors ${jobId === project.id
                                                     ? 'bg-indigo-600/20 text-indigo-300'
                                                     : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
                                                     }`}
                                             >
-                                                <FileCode className="w-4 h-4 flex-shrink-0" />
-                                                <span className="truncate flex-1 text-left">{project.name}</span>
-                                                <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${project.status === 'completed'
-                                                    ? 'bg-green-500/20 text-green-400'
-                                                    : project.status === 'failed'
-                                                        ? 'bg-red-500/20 text-red-400'
-                                                        : 'bg-yellow-500/20 text-yellow-400'
-                                                    }`}>
-                                                    {project.status === 'processing' ? 'building' : project.status}
-                                                </span>
-                                            </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => loadProject(project.id)}
+                                                    className="flex flex-1 items-center gap-2 min-w-0 px-2 py-1 text-left"
+                                                >
+                                                    <FileCode className="w-4 h-4 flex-shrink-0" />
+                                                    <span className="truncate flex-1">{project.name}</span>
+                                                    <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${project.status === 'completed'
+                                                        ? 'bg-green-500/20 text-green-400'
+                                                        : project.status === 'failed'
+                                                            ? 'bg-red-500/20 text-red-400'
+                                                            : 'bg-yellow-500/20 text-yellow-400'
+                                                        }`}>
+                                                        {project.status === 'processing' ? 'building' : project.status}
+                                                    </span>
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    title="Delete project"
+                                                    onClick={(e) => deleteProject(project.id, e)}
+                                                    className="p-1.5 rounded text-zinc-500 hover:text-red-400 hover:bg-red-500/10 flex-shrink-0"
+                                                >
+                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                </button>
+                                            </div>
                                         ))
                                     )}
                                 </div>

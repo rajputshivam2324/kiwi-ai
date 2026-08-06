@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Download, Loader2 } from 'lucide-react';
 import { useAuth } from '@clerk/clerk-react';
+import { API_URL, authHeaders } from '../lib/api';
 
 interface DownloadButtonProps {
     jobId: string | null;
@@ -16,11 +17,8 @@ export const DownloadButton: React.FC<DownloadButtonProps> = ({ jobId, disabled 
 
         setIsDownloading(true);
         try {
-            const token = await getToken();
-            const response = await fetch(`http://localhost:4000/api/build/download/${jobId}`, {
-                headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-                credentials: 'include',
-            });
+            const headers = await authHeaders(getToken);
+            const response = await fetch(`${API_URL}/api/build/download/${jobId}`, { headers });
             if (!response.ok) throw new Error('Download failed');
 
             const blob = await response.blob();
