@@ -1,10 +1,10 @@
 import { motion } from 'framer-motion';
 import { 
-  TrendingUp, Code2, Code, FileText, BookOpen, MessageCircle, Search, 
+  TrendingUp, Code2, BookOpen, MessageCircle, Search, 
   Layers, Zap, Sparkles, Brain, 
   Plus, Mic, ArrowUp, ArrowRight, Github, Twitter, Linkedin
 } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import kiwiHero from '../assets/kiwi-hero.png';
 import { useState, useEffect } from 'react';
 
@@ -33,7 +33,7 @@ export const LandingPage = () => {
     initial: { opacity: 0, y: 30 },
     whileInView: { opacity: 1, y: 0 },
     viewport: { once: true },
-    transition: { duration: 0.6, ease: "easeOut" }
+    transition: { duration: 0.6, ease: "easeOut" as const }
   };
 
   const navLinks = [
