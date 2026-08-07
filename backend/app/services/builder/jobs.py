@@ -14,6 +14,7 @@ from typing import Any
 from app.config import get_settings
 from app.services.builder.json_extract import ProjectFile
 from app.services.builder.verify import npm_install, wait_for_http
+from app.services.builder.vite_preview import ensure_vite_allowed_hosts
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +165,9 @@ async def start_dev_server(
         ok, install_log = await npm_install(project_path)
         if not ok:
             raise RuntimeError(install_log)
+
+    settings = get_settings()
+    ensure_vite_allowed_hosts(project_path, settings.preview_allowed_hosts_list)
 
     proc = await asyncio.create_subprocess_shell(
         f"npm run dev -- --port {port} --host",

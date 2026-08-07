@@ -40,6 +40,7 @@ STACK (mandatory): React 18+ · Vite · TypeScript · Tailwind CSS
 REQUIRED FILES:
 - package.json — scripts: dev, build, preview; deps: react, react-dom, vite, @vitejs/plugin-react, typescript, tailwindcss, postcss, autoprefixer
 - index.html, vite.config.ts, tsconfig.json, tailwind.config.js, postcss.config.js
+- vite.config.ts MUST include server.host true and server.allowedHosts true (required for proxied live preview in production)
 - src/main.tsx, src/App.tsx, src/index.css
 - Prefer src/components/* for UI pieces
 

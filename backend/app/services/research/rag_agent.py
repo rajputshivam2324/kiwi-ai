@@ -139,18 +139,23 @@ class RAGAgent:
             
             elif tool_name == "search_knowledge_base":
                 kb_results = result.get("results", [])
+                note = result.get("note")
                 if kb_results:
                     lines = [f"**Knowledge Base** — {len(kb_results)} relevant chunks:\n"]
                     for r in kb_results:
                         meta = r.get("metadata", {})
-                        aid = meta.get('arxiv_id', '')
-                        cite_url = f"https://arxiv.org/abs/{aid}" if aid else ''
+                        aid = meta.get("arxiv_id", "")
+                        cite_url = f"https://arxiv.org/abs/{aid}" if aid else ""
                         url_line = f" | **CITE URL**: {cite_url}" if cite_url else ""
                         lines.append(
                             f"- **{meta.get('title', 'N/A')}** (arXiv:{aid}){url_line}:\n"
                             f"  {r.get('content', '')[:200]}..."
                         )
                     parts.append("\n".join(lines))
+                elif note:
+                    parts.append(f"**Knowledge Base**: {note}")
+                elif result.get("success"):
+                    parts.append("**Knowledge Base**: No matching ingested papers (live arXiv results above are authoritative).")
         
         return "\n\n---\n\n".join(parts)
     
@@ -189,6 +194,14 @@ class RAGAgent:
         
         return messages
     
+    def _retrieve_documents(self, user_query: str, k: int) -> list[dict[str, Any]]:
+        """Retrieve from knowledge base; never fail the whole query on Chroma errors."""
+        try:
+            return self.vectorstore.similarity_search(query=user_query, k=k)
+        except Exception as e:
+            logger.warning("Knowledge base retrieval failed (continuing with live arXiv): %s", e)
+            return []
+
     def query(
         self,
         user_query: str,
@@ -205,7 +218,7 @@ class RAGAgent:
             
             # 2. Retrieve from knowledge base
             logger.info(f"Retrieving documents for query: {user_query}")
-            retrieved_docs = self.vectorstore.similarity_search(query=user_query, k=k)
+            retrieved_docs = self._retrieve_documents(user_query, k)
             context = self._format_context(retrieved_docs)
             
             # 3. Build messages
@@ -287,7 +300,7 @@ class RAGAgent:
             
             # 4. Retrieve from knowledge base
             yield {"type": "status", "data": "Analyzing relevant papers..."}
-            retrieved_docs = self.vectorstore.similarity_search(query=user_query, k=k)
+            retrieved_docs = self._retrieve_documents(user_query, k)
             
             # 5. Collect, normalize & deduplicate sources
             all_sources = []

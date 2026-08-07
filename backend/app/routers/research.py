@@ -49,6 +49,40 @@ async def research_root():
     }
 
 
+@router.get("/health")
+async def research_health():
+    """Check arXiv connectivity from the server (useful in production debugging)."""
+    from app.services.research.arxiv_client import search_papers
+
+    arxiv_ok = False
+    arxiv_error = None
+    sample_title = None
+    try:
+        papers = search_papers("multi-agent systems", max_results=1)
+        arxiv_ok = bool(papers)
+        if papers:
+            sample_title = papers[0].get("title")
+    except Exception as e:
+        arxiv_error = str(e)
+
+    kb_count = 0
+    kb_error = None
+    try:
+        vs = get_vectorstore_service()
+        kb_count = vs.get_collection_count()
+    except Exception as e:
+        kb_error = str(e)
+
+    return {
+        "status": "ok" if arxiv_ok else "degraded",
+        "arxiv_reachable": arxiv_ok,
+        "arxiv_sample": sample_title,
+        "arxiv_error": arxiv_error,
+        "knowledge_base_documents": kb_count,
+        "knowledge_base_error": kb_error,
+    }
+
+
 @router.get("/stats")
 async def get_stats(
     vectorstore: VectorStoreService = Depends(get_vectorstore_service),

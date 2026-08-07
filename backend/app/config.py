@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     builder_idle_sweep_seconds: int = Field(
         default=60, validation_alias="BUILDER_IDLE_SWEEP_SECONDS"
     )
+    # Vite dev server host allowlist (comma-separated) or "true" for all hosts
+    preview_allowed_hosts: str = Field(
+        default="preview.kiwiai.shivamio.in,localhost,127.0.0.1",
+        validation_alias="PREVIEW_ALLOWED_HOSTS",
+    )
 
     # Groww MCP
     mcp_command: str = Field(default="npx", validation_alias="MCP_COMMAND")
@@ -130,6 +135,13 @@ class Settings(BaseSettings):
     @property
     def mcp_args_list(self) -> list[str]:
         return [a.strip() for a in self.mcp_args.split(",") if a.strip()]
+
+    @property
+    def preview_allowed_hosts_list(self) -> list[str] | bool:
+        raw = (self.preview_allowed_hosts or "").strip()
+        if not raw or raw.lower() in {"true", "*", "all"}:
+            return True
+        return [h.strip() for h in raw.split(",") if h.strip()]
 
     @property
     def finance_available(self) -> bool:

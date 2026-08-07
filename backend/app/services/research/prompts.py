@@ -48,6 +48,8 @@ The following papers were found by live search tools:
 
 {tool_results}
 
+**Important:** If **Live arXiv Search** lists papers above, you MUST cite them — do NOT say you are "unable to retrieve papers." Only report retrieval failure when live search explicitly failed AND the knowledge base has no matches.
+
 ## Knowledge base context
 Retrieved papers — each entry includes the EXACT URL you must use when citing:
 
