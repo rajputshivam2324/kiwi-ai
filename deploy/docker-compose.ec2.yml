@@ -3,6 +3,10 @@ services:
     image: ${BACKEND_IMAGE:?Set BACKEND_IMAGE in webhook.env or shell}
     container_name: kiwi-backend
     restart: unless-stopped
+    # PID 1 in this container is uvicorn, which does not reap orphans. Killing a
+    # preview's process group re-parents npm's children (vite, esbuild) to PID 1,
+    # where they linger as zombies. tini reaps them.
+    init: true
     env_file:
       - ./backend.env
     environment:
