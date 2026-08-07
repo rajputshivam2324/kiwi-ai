@@ -4,12 +4,16 @@ on:
   pull_request:
     paths:
       - "backend/**"
+      - "deploy/**"
       - ".github/workflows/backend-ci-cd.yml"
   push:
     branches:
       - main
     paths:
       - "backend/**"
+      # deploy/ holds host-side assets (webhook, compose, nginx). The webhook
+      # syncs them from git, so a change here must trigger a deploy too.
+      - "deploy/**"
       - ".github/workflows/backend-ci-cd.yml"
   workflow_dispatch:
 
@@ -93,22 +97,62 @@ jobs:
     name: Trigger backend deploy
     runs-on: ubuntu-latest
     needs: docker
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Also allow a manual run, so a deploy can be retried from the Actions tab
+    # without pushing an empty commit.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     steps:
       - name: Call deploy webhook
         env:
           DEPLOY_URL: ${{ secrets.BACKEND_DEPLOY_WEBHOOK_URL }}
           DEPLOY_SECRET: ${{ secrets.BACKEND_DEPLOY_WEBHOOK_SECRET }}
         run: |
-          if [ -z "$DEPLOY_URL" ]; then
+          set -uo pipefail
+
+          if [ -z "${DEPLOY_URL}" ]; then
             echo "BACKEND_DEPLOY_WEBHOOK_URL not set — skipping auto-deploy."
             echo "Image was still published to GHCR. Pull manually on EC2 if needed."
             exit 0
           fi
-          if [ -n "$DEPLOY_SECRET" ]; then
-            curl -fsSL -X POST \
-              -H "X-Deploy-Token: $DEPLOY_SECRET" \
-              "$DEPLOY_URL"
-          else
-            curl -fsSL -X POST "$DEPLOY_URL"
+
+          # Do NOT use `curl -f`: it discards the response body, which is the
+          # only place the webhook can explain *why* a deploy failed.
+          auth=()
+          if [ -n "${DEPLOY_SECRET}" ]; then
+            auth=(-H "X-Deploy-Token: ${DEPLOY_SECRET}")
           fi
+
+          status=0
+          for attempt in 1 2 3; do
+            echo "::group::Deploy attempt ${attempt}"
+            status=$(curl -sS -X POST "${auth[@]}" \
+              --max-time 600 \
+              -o /tmp/deploy-response.txt \
+              -w '%{http_code}' \
+              "${DEPLOY_URL}") || status="000"
+
+            echo "HTTP ${status}"
+            echo "Response:"
+            cat /tmp/deploy-response.txt 2>/dev/null || echo "(empty)"
+            echo ""
+            echo "::endgroup::"
+
+            if [ "${status}" = "200" ]; then
+              echo "Deploy succeeded."
+              exit 0
+            fi
+
+            # Config and auth problems will not fix themselves — fail fast.
+            case "${status}" in
+              400|401|403|404) break ;;
+            esac
+
+            if [ "${attempt}" -lt 3 ]; then
+              echo "Retrying in 20s..."
+              sleep 20
+            fi
+          done
+
+          echo "::error title=Backend deploy failed::Webhook returned HTTP ${status}. See the response body above for the failing step and hint."
+          exit 1

@@ -8,6 +8,7 @@ from pypdf import PdfReader
 
 from app.services.research.arxiv_client import (
     clean_arxiv_id,
+    extract_search_terms,
     fetch_papers_by_ids,
     search_papers,
 )
@@ -31,13 +32,24 @@ class ResearchTools:
             for paper in papers:
                 paper["abstract"] = paper.get("abstract", "")[:500]
 
-            return {
+            result = {
                 "tool": "search_arxiv_live",
                 "success": True,
                 "query": query,
                 "results_count": len(papers),
                 "papers": papers,
             }
+            if not papers:
+                # Reached arXiv, nothing matched. Distinct from a tool failure —
+                # the LLM must not report this as "search errored".
+                terms = extract_search_terms(query)
+                result["note"] = (
+                    "arXiv was reached successfully but returned no matches for "
+                    f"terms {terms or '[none extracted]'}. This is not an error — "
+                    "ask the user to narrow or rephrase the topic."
+                )
+                logger.info("[Tool: search_arxiv_live] no matches for terms=%s", terms)
+            return result
 
         except Exception as e:
             logger.error("[Tool: search_arxiv_live] Error: %s", e)

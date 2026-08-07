@@ -97,7 +97,11 @@ class RAGAgent:
                         )
                     parts.append("\n".join(lines))
                 else:
-                    parts.append(f"**Live arXiv Search**: No papers found for '{result.get('query', '')}'")
+                    note = result.get("note") or "No papers matched."
+                    parts.append(
+                        f"**Live arXiv Search**: No papers found for "
+                        f"'{result.get('query', '')}'. {note}"
+                    )
             
             elif tool_name == "get_paper_details":
                 p = result.get("paper", {})
@@ -290,13 +294,22 @@ class RAGAgent:
             tool_results = execute_tools(tool_calls) if tool_calls else []
             tool_results_str = self._format_tool_results(tool_results)
             
-            # 3. Yield tool results metadata
+            # 3. Yield tool results metadata. Failures are surfaced too —
+            # silently dropping them is why a broken arXiv search looked like
+            # the model "choosing" not to cite papers.
             for tr in tool_results:
                 if tr.get("success"):
-                    yield {"type": "tool_result", "data": {
-                        "tool": tr.get("tool"),
-                        "summary": self._get_tool_summary(tr)
-                    }}
+                    summary = self._get_tool_summary(tr)
+                else:
+                    summary = f"Failed: {tr.get('error', 'unknown error')}"
+                    logger.error(
+                        "Tool %s failed: %s", tr.get("tool"), tr.get("error")
+                    )
+                yield {"type": "tool_result", "data": {
+                    "tool": tr.get("tool"),
+                    "success": bool(tr.get("success")),
+                    "summary": summary,
+                }}
             
             # 4. Retrieve from knowledge base
             yield {"type": "status", "data": "Analyzing relevant papers..."}
