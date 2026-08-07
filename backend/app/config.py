@@ -91,9 +91,9 @@ class Settings(BaseSettings):
     builder_idle_sweep_seconds: int = Field(
         default=60, validation_alias="BUILDER_IDLE_SWEEP_SECONDS"
     )
-    # Vite dev server host allowlist (comma-separated) or "true" for all hosts
+    # Vite dev server host allowlist — "true" allows reverse-proxied preview domain
     preview_allowed_hosts: str = Field(
-        default="preview.kiwiai.shivamio.in,localhost,127.0.0.1",
+        default="true",
         validation_alias="PREVIEW_ALLOWED_HOSTS",
     )
 

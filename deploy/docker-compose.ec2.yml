@@ -13,9 +13,17 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
       - "127.0.0.1:5200:5200"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     volumes:
       - backend_workspaces:/app/workspaces
       - backend_chroma:/app/data/chroma_db
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   prometheus:
     image: prom/prometheus:v2.54.1

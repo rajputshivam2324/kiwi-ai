@@ -49,22 +49,12 @@ async def research_root():
     }
 
 
-@router.get("/health")
+@router.get("/api/research/health")
 async def research_health():
-    """Check arXiv connectivity from the server (useful in production debugging)."""
-    from app.services.research.arxiv_client import search_papers
+    """Research diagnostics — arXiv connectivity + knowledge base size."""
+    from app.services.research.arxiv_client import connectivity_check
 
-    arxiv_ok = False
-    arxiv_error = None
-    sample_title = None
-    try:
-        papers = search_papers("multi-agent systems", max_results=1)
-        arxiv_ok = bool(papers)
-        if papers:
-            sample_title = papers[0].get("title")
-    except Exception as e:
-        arxiv_error = str(e)
-
+    diag = connectivity_check()
     kb_count = 0
     kb_error = None
     try:
@@ -73,14 +63,40 @@ async def research_health():
     except Exception as e:
         kb_error = str(e)
 
+    ok = diag.get("search_ok", False)
     return {
-        "status": "ok" if arxiv_ok else "degraded",
-        "arxiv_reachable": arxiv_ok,
-        "arxiv_sample": sample_title,
-        "arxiv_error": arxiv_error,
+        "status": "ok" if ok else "degraded",
+        "arxiv_reachable": ok,
+        "arxiv_sample": diag.get("sample_title"),
+        "arxiv_errors": diag.get("errors") or None,
+        "connectivity": diag,
         "knowledge_base_documents": kb_count,
         "knowledge_base_error": kb_error,
     }
+
+
+@router.get("/api/research/search")
+async def research_search_test(q: str = Query(..., min_length=2)):
+    """Debug endpoint — test live arXiv search and return raw results."""
+    from app.services.research.arxiv_client import search_papers
+
+    try:
+        papers = search_papers(q, max_results=5)
+        return {"success": True, "count": len(papers), "papers": papers}
+    except Exception as e:
+        from app.services.research.arxiv_client import connectivity_check
+
+        return {
+            "success": False,
+            "error": str(e),
+            "connectivity": connectivity_check(),
+        }
+
+
+@router.get("/health")
+async def research_health_legacy():
+    """Legacy path — prefer GET /api/research/health (finance also mounts /health)."""
+    return await research_health()
 
 
 @router.get("/stats")

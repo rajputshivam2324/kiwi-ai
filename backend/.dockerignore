@@ -2,12 +2,31 @@
 .venv
 venv
 __pycache__
+**/__pycache__
 *.pyc
+*.pyo
 .pytest_cache
+.mypy_cache
+.ruff_cache
+htmlcov
+.coverage
+*.egg-info
+
+# Runtime data (mounted as volumes in production)
 data/chroma_db
 workspaces
+
+# Not needed in image
 node_modules
 dist
 build
+evals
+tests
+docs
+deploy
+.github
+.git
+*.md
 Dockerfile*
-README.md
+docker-compose*.yml
+.env.example

@@ -11,6 +11,18 @@ logger = logging.getLogger(__name__)
 
 _CONFIG_NAMES = ("vite.config.ts", "vite.config.js", "vite.config.mjs")
 
+_DEFAULT_VITE_CONFIG = """import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    host: true,
+    allowedHosts: true,
+  },
+});
+"""
+
 
 def _allowed_hosts_literal(allowed_hosts: list[str] | bool) -> str:
     if allowed_hosts is True:
@@ -24,29 +36,34 @@ def _inject_server_block(text: str, allowed_literal: str) -> str:
     allowedHosts: {allowed_literal},
   }},
 """
-    if "defineConfig({" in text:
-        return text.replace("defineConfig({", f"defineConfig({{\n{snippet}", 1)
-    if "export default {" in text:
-        return text.replace("export default {", f"export default {{\n{snippet}", 1)
+    patterns = (
+        ("defineConfig({", f"defineConfig({{\n{snippet}"),
+        ("defineConfig(\n  {", f"defineConfig(\n  {{\n{snippet}"),
+        ("defineConfig( {", f"defineConfig( {{\n{snippet}"),
+        ("export default {", f"export default {{\n{snippet}"),
+    )
+    for needle, replacement in patterns:
+        if needle in text:
+            return text.replace(needle, replacement, 1)
     return text
 
 
 def _replace_allowed_hosts(text: str, allowed_literal: str) -> str:
-    if re.search(r"allowedHosts\s*:\s*true\b", text):
-        if allowed_literal == "true":
-            return text
+    if re.search(r"allowedHosts\s*:", text):
         return re.sub(
-            r"allowedHosts\s*:\s*true",
+            r"allowedHosts\s*:\s*[^,\n}]+",
             f"allowedHosts: {allowed_literal}",
             text,
             count=1,
         )
-    return re.sub(
-        r"allowedHosts\s*:\s*\[[^\]]*\]",
-        f"allowedHosts: {allowed_literal}",
-        text,
-        count=1,
-    )
+    return text
+
+
+def _create_default_config(project_path: Path) -> Path:
+    path = project_path / "vite.config.ts"
+    path.write_text(_DEFAULT_VITE_CONFIG, encoding="utf-8")
+    logger.info("Created %s with allowedHosts for preview proxy", path.name)
+    return path
 
 
 def ensure_vite_allowed_hosts(
@@ -55,15 +72,16 @@ def ensure_vite_allowed_hosts(
 ) -> bool:
     """
     Patch vite.config so Vite accepts Host header from Nginx (e.g. preview.kiwiai.shivamio.in).
-    Returns True if a config file was updated.
+    Creates vite.config.ts when missing. Returns True if filesystem changed.
     """
     allowed_literal = _allowed_hosts_literal(allowed_hosts)
 
-    for name in _CONFIG_NAMES:
-        path = project_path / name
-        if not path.exists():
-            continue
+    existing = [project_path / name for name in _CONFIG_NAMES if (project_path / name).exists()]
+    if not existing:
+        _create_default_config(project_path)
+        return True
 
+    for path in existing:
         text = path.read_text(encoding="utf-8")
         original = text
 
@@ -72,12 +90,13 @@ def ensure_vite_allowed_hosts(
         else:
             text = _inject_server_block(text, allowed_literal)
 
+        if text == original:
+            text = _inject_server_block(text, allowed_literal)
+
         if text != original:
             path.write_text(text, encoding="utf-8")
             logger.info("Patched %s allowedHosts for preview proxy", path.name)
             return True
 
-        return False
-
-    logger.warning("No vite.config found under %s — preview host check may fail", project_path)
+    logger.warning("Could not patch vite config under %s", project_path)
     return False

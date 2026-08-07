@@ -32,13 +32,13 @@ def test_parse_export_atom():
     assert papers[0]["url"] == "https://arxiv.org/abs/2203.08975v2"
 
 
-def test_search_papers_uses_export_fallback_when_client_fails():
+def test_search_papers_uses_client_fallback_when_export_fails():
     with patch(
-        "app.services.research.arxiv_client.get_arxiv_client",
+        "app.services.research.arxiv_client._search_export_api",
         side_effect=RuntimeError("blocked"),
     ):
         with patch(
-            "app.services.research.arxiv_client._search_export_api",
+            "app.services.research.arxiv_client._search_client_api",
             return_value=[
                 {
                     "arxiv_id": "1234.56789",

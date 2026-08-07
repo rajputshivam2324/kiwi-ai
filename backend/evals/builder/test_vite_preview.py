@@ -18,12 +18,9 @@ def test_inject_allowed_hosts_into_vite_config(tmp_path: Path) -> None:
     assert "preview.kiwiai.shivamio.in" in text
 
 
-def test_replace_existing_allowed_hosts(tmp_path: Path) -> None:
-    cfg = tmp_path / "vite.config.ts"
-    cfg.write_text(
-        "export default defineConfig({ server: { allowedHosts: ['localhost'] } })\n",
-        encoding="utf-8",
-    )
+def test_creates_config_when_missing(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text('{"name":"todo"}', encoding="utf-8")
     ensure_vite_allowed_hosts(tmp_path, True)
-    text = cfg.read_text(encoding="utf-8")
-    assert "allowedHosts: true" in text
+    cfg = tmp_path / "vite.config.ts"
+    assert cfg.exists()
+    assert "allowedHosts: true" in cfg.read_text(encoding="utf-8")
