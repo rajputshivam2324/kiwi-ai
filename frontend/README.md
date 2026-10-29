@@ -1,73 +1,62 @@
-# React + TypeScript + Vite
+# Kiwi AI frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The React/TypeScript interface for chat, academic research, and the application builder. It uses Vite, Tailwind CSS, Clerk, Monaco, and streamed responses from the unified FastAPI backend.
 
-Currently, two official plugins are available:
+See the [project setup guide](../README.md#run-locally) for PostgreSQL, model credentials, and backend startup.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Run
 
-## React Compiler
+Use Node.js **22.12+**, or the supported Node 20.19+ line. From `frontend/`:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+test -f .env || cp .env.example .env
+npm ci
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Configure `.env`:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```dotenv
+VITE_CLERK_PUBLISHABLE_KEY=your_clerk_publishable_key
+VITE_API_URL=http://localhost:8000
+VITE_PREVIEW_BASE_URL=http://localhost:5200
 ```
+
+Open `http://localhost:5173`. Chat and builder routes require a Clerk session. Gemini, database, and Langfuse secrets belong in the backend environment; only the Clerk publishable key is used by the browser.
+
+## Pages and components
+
+| Path | Responsibility |
+| --- | --- |
+| `src/pages/LandingPage.tsx` | Public product page |
+| `src/pages/AuthLandingPage.tsx` | Sign-in entry point |
+| `src/pages/ChatPage.tsx` | General chat, research conversations, source cards, and finance-mode UI |
+| `src/pages/BuilderPage.tsx` | Project generation and editing interface |
+| `src/components/CodeEditor.tsx` | Monaco editing |
+| `src/components/FileTree.tsx` | Generated project navigation |
+| `src/components/Preview.tsx` | Live Vite preview |
+| `src/components/MarkdownRenderer.tsx` | Markdown, code, and mathematical response rendering |
+| `src/lib/api.ts` | API base URL and authenticated request headers |
+
+Research conversation operations send the Clerk bearer token. General chat and research preserve the server's `conversation_id` on subsequent turns. Finance UI availability does not imply backend availability: the finance API is disabled in production.
+
+## Checks
+
+```bash
+npm run build
+npm run lint
+```
+
+`build` runs TypeScript checks and creates the production bundle in `dist/`. `lint` runs the repository's ESLint configuration.
+
+## Deployment
+
+The connected Vercel project builds this directory using [vercel.json](vercel.json). Set the frontend environment variables in Vercel before building:
+
+```dotenv
+VITE_CLERK_PUBLISHABLE_KEY=your_production_clerk_publishable_key
+VITE_API_URL=https://api.kiwiai.shivamio.in
+VITE_PREVIEW_BASE_URL=https://preview.kiwiai.shivamio.in
+```
+
+The API and generated-app preview use separate origins. The backend must allow the frontend's origin through `CORS_ORIGINS`, and its Clerk JWKS configuration must correspond to the frontend's Clerk application. SSE buffering and preview WebSocket forwarding are configured by the backend's Nginx deployment assets.
