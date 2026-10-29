@@ -100,6 +100,8 @@ def test_content_mask_preserves_operational_metrics():
 def test_langchain_callbacks_passed_to_invoke_and_stream(monkeypatch):
     monkeypatch.setattr("app.services.research.llm_service.langchain_config", lambda: {"callbacks": ["handler"]})
     service = LLMService.__new__(LLMService)
+    from app.config import get_settings
+    service.settings = get_settings()
     service.client = Mock()
     service.client.invoke.return_value = SimpleNamespace(content="answer", additional_kwargs={})
     service.client.stream.return_value = iter([SimpleNamespace(content="chunk", additional_kwargs={})])
@@ -139,3 +141,22 @@ def test_actual_sdk_exports_nested_spans_without_content(monkeypatch):
         assert "80" in attributes
     finally:
         client.shutdown()
+
+
+def test_rejected_cached_generation_retries_original_prompt_once(monkeypatch):
+    from app.config import get_settings
+    from app.services.prompt_cache import CachedRequest
+    service=LLMService.__new__(LLMService)
+    service.settings=get_settings()
+    service.client=Mock()
+    error=RuntimeError('cached content no longer exists')
+    service.client.invoke.side_effect=[error,SimpleNamespace(content='answer',additional_kwargs={},usage_metadata={})]
+    cache=Mock()
+    cache.prepare.return_value=CachedRequest([{'role':'user','content':'question'}],'cachedContents/expired','key','hit')
+    cache.rejected.return_value=True
+    monkeypatch.setattr('app.services.research.llm_service.get_prompt_cache',lambda:cache)
+    messages=[{'role':'system','content':'Original system instructions'},{'role':'user','content':'question'}]
+    assert service.invoke(messages)['content'] == 'answer'
+    assert service.client.invoke.call_count == 2
+    assert service.client.invoke.call_args.args[0] == messages
+    cache.invalidate.assert_called_once()

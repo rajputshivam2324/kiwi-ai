@@ -13,6 +13,7 @@ from prometheus_client import Counter, Histogram
 
 from app.config import get_settings
 from app.services.observability import enable_openai_tracing, traced
+from app.services.prompt_cache import get_prompt_cache, record_cache_usage
 
 logger = logging.getLogger(__name__)
 
@@ -135,26 +136,51 @@ async def stream_chat_with_retry(
     client = get_async_client(timeout_ms=timeout_ms)
     retries = max_retries if max_retries is not None else settings.gemini_max_retries
     model_name = model or settings.llm_model
+    cache = get_prompt_cache()
+    prepared = await asyncio.to_thread(cache.prepare, messages, model_name, tools)
     last_err: BaseException | None = None
 
     params: dict[str, Any] = {
         "model": model_name,
-        "messages": messages,
+        "messages": prepared.messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
         "stream": True,
+        "stream_options": {"include_usage": True},
     }
     if top_p is not None:
         params["top_p"] = top_p
-    if tools:
+    if tools and not prepared.name:
         params["tools"] = tools
+    if prepared.name:
+        params["extra_body"] = {"extra_body":{"google":{"cached_content":prepared.name}}}
 
     for attempt in range(retries):
         attempt_start = time.monotonic()
+        emitted = False
+        cache_tokens = 0
         try:
-            stream = await client.chat.completions.create(**params)
-            async for chunk in stream:
-                yield chunk
+            try:
+                stream = await client.chat.completions.create(**params)
+            except Exception as error:
+                if not prepared.name or not cache.rejected(error):
+                    raise
+                await asyncio.to_thread(cache.invalidate, prepared)
+                params.pop("extra_body", None)
+                params["messages"] = messages
+                if tools:
+                    params["tools"] = tools
+                prepared.name = None
+                stream = await client.chat.completions.create(**params)
+            async with stream:
+                async for chunk in stream:
+                    emitted = True
+                    usage = getattr(chunk, "usage", None)
+                    details = getattr(usage, "prompt_tokens_details", None)
+                    cache_tokens = max(cache_tokens, getattr(details, "cached_tokens", 0) or 0)
+                    yield chunk
+            record_cache_usage("implicit_hit" if cache_tokens and not prepared.name else prepared.status,
+                               model_name, cache_tokens)
             _GEMINI_ATTEMPTS_TOTAL.labels(model=model_name, outcome="success").inc()
             _GEMINI_ATTEMPT_DURATION_SECONDS.labels(model=model_name, outcome="success").observe(
                 time.monotonic() - attempt_start
@@ -162,7 +188,7 @@ async def stream_chat_with_retry(
             return
         except Exception as err:
             last_err = err
-            if not is_retryable_error(err) or attempt >= retries - 1:
+            if emitted or not is_retryable_error(err) or attempt >= retries - 1:
                 _GEMINI_ATTEMPTS_TOTAL.labels(model=model_name, outcome="failure").inc()
                 _GEMINI_ATTEMPT_DURATION_SECONDS.labels(model=model_name, outcome="failure").observe(
                     time.monotonic() - attempt_start

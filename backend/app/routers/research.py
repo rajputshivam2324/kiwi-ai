@@ -14,6 +14,9 @@ from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
 from app.deps.rate_limit import rate_limit_dependency
+from app.deps.auth import require_auth
+from app.services.memory import ConversationMemory, MemoryNotFound, MemoryBusy
+from app.services.research.database import get_memory
 
 from app.services.observability import trace_attributes, traced
 
@@ -27,14 +30,6 @@ from app.models.research import (
     IngestRequest,
     IngestResponse,
     MessageOut,
-)
-from app.services.research.database import (
-    add_message,
-    auto_title_conversation,
-    create_conversation,
-    delete_conversation,
-    get_conversation_messages,
-    list_conversations,
 )
 from app.services.research.rag_agent import RAGAgent, get_rag_agent
 from app.services.research.vectorstore import VectorStoreService, get_vectorstore_service
@@ -119,212 +114,153 @@ async def get_stats(
         raise HTTPException(500, detail=str(e)) from e
 
 
+def _memory_error(error):
+    if isinstance(error, MemoryNotFound):
+        return HTTPException(404, detail="Conversation not found")
+    if isinstance(error, MemoryBusy):
+        return HTTPException(409, detail=str(error))
+    return HTTPException(500, detail="Research request failed")
+
+
 @router.post("/conversations")
-async def create_new_conversation(request: ConversationCreate):
-    try:
-        conv_id = await create_conversation(
-            user_id=request.user_id, title=request.title
-        )
-        return {"conversation_id": conv_id, "title": request.title}
-    except Exception as e:
-        raise HTTPException(500, detail=str(e)) from e
+async def create_new_conversation(request: ConversationCreate, user_id: str = Depends(require_auth),
+                                  memory: ConversationMemory = Depends(get_memory)):
+    if request.user_id != user_id:
+        raise HTTPException(403, detail="User ID does not match authenticated user")
+    conv_id = await asyncio.to_thread(memory.create, user_id, request.title)
+    return {"conversation_id":conv_id, "title":request.title}
 
 
 @router.get("/conversations", response_model=ConversationListResponse)
-async def get_conversations(user_id: str = Query(..., description="User ID")):
-    try:
-        convs = await list_conversations(user_id)
-        return ConversationListResponse(
-            conversations=[ConversationSummary(**c) for c in convs]
-        )
-    except Exception as e:
-        raise HTTPException(500, detail=str(e)) from e
+async def get_conversations(user_id: str | None = Query(None), actor: str = Depends(require_auth),
+                            memory: ConversationMemory = Depends(get_memory)):
+    if user_id and user_id != actor:
+        raise HTTPException(403, detail="User ID does not match authenticated user")
+    return ConversationListResponse(conversations=[ConversationSummary(**c) for c in await asyncio.to_thread(memory.list, actor)])
 
 
-@router.get(
-    "/conversations/{conversation_id}/messages",
-    response_model=ConversationMessagesResponse,
-)
-async def get_messages(conversation_id: str):
+@router.get("/conversations/{conversation_id}/messages", response_model=ConversationMessagesResponse)
+async def get_messages(conversation_id: str, user_id: str = Depends(require_auth),
+                       memory: ConversationMemory = Depends(get_memory)):
     try:
-        msgs = await get_conversation_messages(conversation_id)
-        return ConversationMessagesResponse(
-            conversation_id=conversation_id,
-            messages=[MessageOut(**m) for m in msgs],
-        )
-    except Exception as e:
-        raise HTTPException(500, detail=str(e)) from e
+        messages = await asyncio.to_thread(memory.messages, conversation_id, user_id)
+        return ConversationMessagesResponse(conversation_id=conversation_id, messages=[MessageOut(**m) for m in messages])
+    except MemoryNotFound as error:
+        raise _memory_error(error) from error
 
 
 @router.delete("/conversations/{conversation_id}")
-async def remove_conversation(conversation_id: str):
+async def remove_conversation(conversation_id: str, user_id: str = Depends(require_auth),
+                              memory: ConversationMemory = Depends(get_memory)):
     try:
-        await delete_conversation(conversation_id)
-        return {"status": "deleted", "conversation_id": conversation_id}
-    except Exception as e:
-        raise HTTPException(500, detail=str(e)) from e
+        await asyncio.to_thread(memory.delete, conversation_id, user_id)
+        return {"status":"deleted", "conversation_id":conversation_id}
+    except MemoryNotFound as error:
+        raise _memory_error(error) from error
+
+
+async def _start_request(request, user_id, memory):
+    if request.user_id and request.user_id != user_id:
+        raise HTTPException(403, detail="User ID does not match authenticated user")
+    try:
+        conv_id, turn_id = await asyncio.to_thread(memory.begin_turn, user_id, request.message, request.conversation_id)
+        try:
+            history = await asyncio.to_thread(memory.context, conv_id, user_id, turn_id)
+        except BaseException:
+            await asyncio.to_thread(memory.finish_turn, conv_id, user_id, turn_id)
+            raise
+        return conv_id, turn_id, history
+    except (MemoryNotFound, MemoryBusy) as error:
+        raise _memory_error(error) from error
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(
-    request: ChatRequest,
-    rag_agent: RAGAgent = Depends(get_rag_agent),
-    _: None = Depends(rate_limit_dependency),
-):
+async def chat(request: ChatRequest, rag_agent: RAGAgent = Depends(get_rag_agent),
+               user_id: str = Depends(require_auth), memory: ConversationMemory = Depends(get_memory),
+               _: None = Depends(rate_limit_dependency)):
+    conv_id, turn_id, history = await _start_request(request, user_id, memory)
+    result = None
     try:
-        history = []
-        if request.conversation_id:
-            db_messages = await get_conversation_messages(request.conversation_id)
-            history = [
-                {"role": m["role"], "content": m["content"]} for m in db_messages
-            ]
-        else:
-            history = [
-                {"role": msg.role, "content": msg.content}
-                for msg in request.conversation_history
-            ]
-
-        conv_id = request.conversation_id
-        if request.user_id and not conv_id:
-            conv_id = await create_conversation(request.user_id)
-            await auto_title_conversation(conv_id, request.message)
-        with trace_attributes(request.user_id, conv_id):
-            result = await asyncio.to_thread(
-                rag_agent.query, user_query=request.message, conversation_history=history, k=6
-            )
-
-        if request.user_id:
-            await add_message(conv_id, "user", request.message)
-            await add_message(
-                conv_id, "assistant", result["answer"], result.get("sources")
-            )
-
-        return ChatResponse(
-            answer=result["answer"],
-            sources=result["sources"],
-            reasoning=result.get("reasoning"),
-            conversation_id=conv_id,
-        )
-    except Exception as e:
-        logger.error("Error in chat endpoint: %s", e)
-        raise HTTPException(500, detail=str(e)) from e
+        with trace_attributes(user_id, conv_id):
+            result = await asyncio.to_thread(rag_agent.query, user_query=request.message, conversation_history=history, k=6)
+        return ChatResponse(answer=result["answer"], sources=result["sources"],
+                            reasoning=result.get("reasoning"), conversation_id=conv_id)
+    finally:
+        await asyncio.to_thread(memory.finish_turn, conv_id, user_id, turn_id,
+                                result["answer"] if result else None, result.get("sources") if result else None)
 
 
-async def generate_chat_stream(
-    message: str,
-    conversation_history: list,
-    rag_agent: RAGAgent,
-    conversation_id: str | None = None,
-    user_id: str | None = None,
-) -> AsyncIterator[str]:
-    try:
-        conv_id = conversation_id
-        is_new = False
-        if user_id and not conv_id:
-            conv_id = await create_conversation(user_id)
-            is_new = True
+async def generate_chat_stream(message, conversation_history, rag_agent, conversation_id, user_id, turn_id, memory):
+    queue: asyncio.Queue = asyncio.Queue(maxsize=64)
+    sentinel = object()
+    stopped = Event()
+    loop = asyncio.get_running_loop()
+    full_response, sources, successful = "", [], False
 
-        if conv_id:
-            yield f"data: {json.dumps({'type': 'conversation_id', 'data': conv_id})}\n\n"
-
-        if conv_id:
-            await add_message(conv_id, "user", message)
-            if is_new:
-                await auto_title_conversation(conv_id, message)
-
-        full_response = ""
-        sources_data: list = []
-        queue: asyncio.Queue = asyncio.Queue()
-        sentinel = object()
-
-        stopped = Event()
-        loop = asyncio.get_running_loop()
-
-        def _run_sync_stream():
+    def send(item):
+        from concurrent.futures import TimeoutError
+        if stopped.is_set():
+            return
+        future = asyncio.run_coroutine_threadsafe(queue.put(item), loop)
+        while not stopped.is_set():
             try:
-                with trace_attributes(user_id, conv_id):
-                    stream = rag_agent.query_stream(
-                        user_query=message, conversation_history=conversation_history, k=6,
-                    )
-                    try:
-                        for chunk in stream:
-                            if stopped.is_set():
-                                break
-                            loop.call_soon_threadsafe(queue.put_nowait, chunk)
-                    finally:
-                        stream.close()
-            except Exception as stream_err:
-                loop.call_soon_threadsafe(queue.put_nowait, {"type": "error", "data": str(stream_err)})
-            finally:
-                loop.call_soon_threadsafe(queue.put_nowait, sentinel)
+                future.result(timeout=1)
+                return
+            except TimeoutError:
+                continue
+        future.cancel()
 
-        stream_task = loop.run_in_executor(None, copy_context().run, _run_sync_stream)
-
+    def worker():
         try:
-            while True:
-                chunk = await queue.get()
-                if chunk is sentinel:
-                    break
-                if chunk.get("type") == "content":
-                    full_response += chunk.get("data", "")
-                elif chunk.get("type") == "sources":
-                    sources_data = chunk.get("data", [])
-                yield f"data: {json.dumps(chunk)}\n\n"
+            with trace_attributes(user_id, conversation_id):
+                stream = rag_agent.query_stream(user_query=message, conversation_history=conversation_history, k=6)
+                try:
+                    for chunk in stream:
+                        if stopped.is_set():
+                            break
+                        send(chunk)
+                finally:
+                    stream.close()
+        except Exception:
+            logger.exception("Research stream failed")
+            send({"type":"error", "data":"Research generation failed"})
         finally:
-            stopped.set()
+            send(sentinel)
 
-        await stream_task
-
-        if conv_id and full_response:
-            db_sources = []
-            for s in sources_data[:10]:
-                meta = s.get("metadata", {})
-                db_sources.append(
-                    {
-                        "title": meta.get("title", ""),
-                        "arxiv_id": meta.get("arxiv_id", ""),
-                        "url": meta.get("url", meta.get("pdf_url", "")),
-                    }
-                )
-            await add_message(conv_id, "assistant", full_response, db_sources)
-
+    task = None
+    try:
+        yield f"data: {json.dumps({'type':'conversation_id', 'data':conversation_id})}\n\n"
+        task = loop.run_in_executor(None, copy_context().run, worker)
+        failed = False
+        while True:
+            chunk = await queue.get()
+            if chunk is sentinel:
+                break
+            if chunk.get("type") == "content":
+                full_response += chunk.get("data", "")
+            elif chunk.get("type") == "sources":
+                sources = chunk.get("data", [])
+            elif chunk.get("type") == "error":
+                failed = True
+            yield f"data: {json.dumps(chunk)}\n\n"
+        await task
+        successful = not failed
         yield "data: [DONE]\n\n"
-    except Exception as e:
-        logger.error("Error in streaming: %s", e)
-        yield f"data: {json.dumps({'type': 'error', 'data': str(e)})}\n\n"
+    finally:
+        stopped.set()
+        await asyncio.shield(asyncio.to_thread(memory.finish_turn, conversation_id, user_id, turn_id,
+                                              full_response if successful else None, sources))
 
 
 @router.post("/chat/stream")
-async def chat_stream(
-    request: ChatRequest,
-    rag_agent: RAGAgent = Depends(get_rag_agent),
-    _: None = Depends(rate_limit_dependency),
-):
-    try:
-        if request.conversation_id:
-            db_messages = await get_conversation_messages(request.conversation_id)
-            history = [
-                {"role": m["role"], "content": m["content"]} for m in db_messages
-            ]
-        else:
-            history = [
-                {"role": msg.role, "content": msg.content}
-                for msg in request.conversation_history
-            ]
-
-        return StreamingResponse(
-            generate_chat_stream(
-                message=request.message,
-                conversation_history=history,
-                rag_agent=rag_agent,
-                conversation_id=request.conversation_id,
-                user_id=request.user_id,
-            ),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-        )
-    except Exception as e:
-        raise HTTPException(500, detail=str(e)) from e
+async def chat_stream(request: ChatRequest, rag_agent: RAGAgent = Depends(get_rag_agent),
+                      user_id: str = Depends(require_auth), memory: ConversationMemory = Depends(get_memory),
+                      _: None = Depends(rate_limit_dependency)):
+    conv_id, turn_id, history = await _start_request(request, user_id, memory)
+    return StreamingResponse(
+        generate_chat_stream(request.message, history, rag_agent, conv_id, user_id, turn_id, memory),
+        media_type="text/event-stream", headers={"Cache-Control":"no-cache", "Connection":"keep-alive"},
+    )
 
 
 @router.post("/ingest", response_model=IngestResponse)

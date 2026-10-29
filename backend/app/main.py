@@ -14,6 +14,7 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.config import get_settings
 from app.services.observability import get_langfuse, shutdown_langfuse
+from app.services.postgres import close_postgres
 from app.routers import builder, chat, finance, research
 from app.services.builder.db import close_builder_pool, init_builder_db
 from app.services.builder.jobs import (
@@ -100,6 +101,7 @@ async def lifespan(app: FastAPI):
     await close_builder_pool()
     await close_research_pool()
     await asyncio.to_thread(shutdown_langfuse)
+    await asyncio.to_thread(close_postgres)
 
 
 app = FastAPI(

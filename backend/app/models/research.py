@@ -8,7 +8,7 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(..., description="User's question")
+    message: str = Field(..., min_length=1, max_length=32000, description="User's question")
     conversation_id: Optional[str] = Field(None, description="Existing conversation ID (omit for new conversation)")
     user_id: Optional[str] = Field(None, description="User ID from Clerk auth")
     conversation_history: List[ChatMessage] = Field(

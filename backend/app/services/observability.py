@@ -5,12 +5,14 @@ the mask also applies to the LangChain callback's prompts and completions.
 """
 from contextlib import contextmanager
 from functools import lru_cache, wraps
+from contextvars import ContextVar
 import inspect
 import logging
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
+request_user_id = ContextVar("kiwi_request_user_id", default=None)
 
 
 def _mask_content(*, data, **_):
@@ -18,7 +20,8 @@ def _mask_content(*, data, **_):
     # operational attributes while suppressing arbitrary prompts and documents.
     safe = {"documents", "dimensions", "bytes", "sha256", "pages", "ocr_pages", "arxiv_id",
             "chunks_added", "skipped", "dense_candidates", "lexical_candidates", "selected",
-            "chunk_ids", "tokens", "model", "ls_provider", "ls_model_name", "ls_model_type"}
+            "chunk_ids", "tokens", "model", "ls_provider", "ls_model_name", "ls_model_type",
+            "cache_status", "cache_key", "cache_read_tokens", "summary_messages"}
     if isinstance(data, dict):
         return {key: value if key in safe else "[content capture disabled]" for key, value in data.items()}
     return "[content capture disabled]"
@@ -146,16 +149,20 @@ def _record_result(span, result):
 def trace_attributes(user_id=None, session_id=None):
     # ExitStack separates tracing setup failures from the request body.
     from contextlib import ExitStack
-    with ExitStack() as stack:
-        if get_langfuse() is not None:
-            try:
-                from langfuse import propagate_attributes
-                stack.enter_context(propagate_attributes(
-                    user_id=user_id, session_id=session_id, tags=["kiwi", "research"]
-                ))
-            except Exception:
-                logger.warning("Langfuse attributes failed", exc_info=True)
-        yield
+    token = request_user_id.set(user_id)
+    try:
+        with ExitStack() as stack:
+            if get_langfuse() is not None:
+                try:
+                    from langfuse import propagate_attributes
+                    stack.enter_context(propagate_attributes(
+                        user_id=user_id, session_id=session_id, tags=["kiwi"]
+                    ))
+                except Exception:
+                    logger.warning("Langfuse attributes failed", exc_info=True)
+            yield
+    finally:
+        request_user_id.reset(token)
 
 
 def langchain_config():

@@ -1,13 +1,15 @@
-from app.services.research.prompts import SYSTEM_PROMPT
+from app.services.research.prompts import STABLE_SYSTEM_PROMPT
 from app.services.research.llm_service import get_llm_service
 from app.services.research.vectorstore import get_vectorstore_service
 from app.services.research.tools import analyze_query_for_tools, execute_tools
 from app.config import get_settings
 from app.services.observability import traced
 from app.services.research.pdf_pipeline import token_count, truncate_tokens
+from app.services.memory import bounded_history
 from typing import List, Dict, Any, Iterator
 import json
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -191,15 +193,14 @@ class RAGAgent:
         # Add system prompt with context and tool results
         messages.append({
             "role": "system",
-            "content": SYSTEM_PROMPT.format(
-                context=context,
-                tool_results=tool_results_str
-            )
+            "content": STABLE_SYSTEM_PROMPT
         })
+        messages.append({"role":"user", "content":"<research_evidence>\nKnowledge base:\n" + context
+                         + "\nTool results:\n" + truncate_tokens(tool_results_str, 4000) + "\n</research_evidence>"})
         
         # Add conversation history if provided
         if conversation_history:
-            for msg in conversation_history:
+            for msg in bounded_history(conversation_history):
                 messages.append({
                     "role": msg.get("role", "user"),
                     "content": msg.get("content", "")
@@ -221,6 +222,16 @@ class RAGAgent:
             logger.warning("Knowledge base retrieval failed (continuing with live arXiv): %s", e)
             return []
 
+    @staticmethod
+    def _retrieval_query(query, history):
+        if re.search(r"\b(it|its|they|their|that|those|this|same|above)\b", query, re.I):
+            memory = [m.get("content", "") for m in (history or [])
+                      if m.get("content", "").startswith("[Prior conversation summary;")]
+            for message in reversed(history or []):
+                if message.get("role") == "user":
+                    return truncate_tokens("\n".join(memory), 160) + "\n" + truncate_tokens(message.get("content", ""), 160) + "\n" + query
+        return query
+
     @traced("research.rag.query", "agent")
     def query(
         self,
@@ -238,7 +249,7 @@ class RAGAgent:
             
             # 2. Retrieve from knowledge base
             logger.info(f"Retrieving documents for query: {user_query}")
-            retrieved_docs = self._retrieve_documents(user_query, k)
+            retrieved_docs = self._retrieve_documents(self._retrieval_query(user_query, conversation_history), k)
             context = self._format_context(retrieved_docs)
             
             # 3. Build messages
@@ -330,7 +341,7 @@ class RAGAgent:
             
             # 4. Retrieve from knowledge base
             yield {"type": "status", "data": "Analyzing relevant papers..."}
-            retrieved_docs = self._retrieve_documents(user_query, k)
+            retrieved_docs = self._retrieve_documents(self._retrieval_query(user_query, conversation_history), k)
             
             # 5. Collect, normalize & deduplicate sources
             all_sources = []

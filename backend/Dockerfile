@@ -67,8 +67,8 @@ COPY . .
 RUN mkdir -p /app/workspaces /app/data/chroma_db
 
 # Fail the image build if the runtime cannot load the app/PDF stack, the
-# preloaded tokenizer, FTS5, or the OCR binary used for scanned documents.
-RUN python -c "import app.main, pymupdf4llm, langfuse, tiktoken, sqlite3; tiktoken.get_encoding('cl100k_base'); sqlite3.connect(':memory:').execute('CREATE VIRTUAL TABLE chunks USING fts5(text)')" \
+# preloaded tokenizer, PostgreSQL driver, or OCR binary for scanned documents.
+RUN python -c "import app.main, pymupdf4llm, langfuse, tiktoken, psycopg; tiktoken.get_encoding('cl100k_base')" \
     && tesseract --version
 
 EXPOSE 8000

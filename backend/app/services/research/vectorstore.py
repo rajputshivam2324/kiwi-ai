@@ -1,10 +1,8 @@
-"""Chroma dense retrieval + persistent SQLite BM25 + parent expansion."""
+"""Chroma semantic retrieval + PostgreSQL full-text search + parent expansion."""
 from collections import Counter
 import hashlib
 import logging
 from pathlib import Path
-import tempfile
-from uuid import uuid4
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
@@ -31,29 +29,31 @@ class VectorStoreService:
         # Preserve existing collection settings and legacy embeddings.
         self.collection = self.chroma_client.get_or_create_collection(self.settings.collection_name)
         name = hashlib.sha256(self.settings.collection_name.encode()).hexdigest()[:16]
-        self.index = DocumentIndex(Path(self.settings.chroma_db_path) / f"rag-{name}.sqlite3")
+        self.index = DocumentIndex(self.settings.collection_name)
+        self.index.migrate_sqlite(Path(self.settings.chroma_db_path) / f"rag-{name}.sqlite3")
 
     @traced("research.index.document")
     def index_document(self, document_id, revision, chunks):
         if self.index.matches(document_id, revision):
             return 0
-        run_id = uuid4().hex
         activated = False
-        with tempfile.TemporaryDirectory(prefix="kiwi-index-") as temp:
-            stage = DocumentIndex(Path(temp) / "stage.sqlite3")
-            count = stage.stage(document_id, revision, run_id, chunks)
+        with self.index.staging(document_id, revision) as stage:
+            count = stage.write(chunks, self.settings.rag_embedding_batch_size)
             if not count:
                 raise ValueError("Cannot index an empty document")
             try:
                 for batch in stage.batches(self.settings.rag_embedding_batch_size):
                     self.add_documents([row["content"] for row in batch],
                                        [row["metadata"] for row in batch], [row["id"] for row in batch])
-                retired_runs = self.index.activate(stage, document_id)
+                retired_runs = self.index.activate(stage)
                 activated = True
             finally:
                 if not activated:
                     try:
-                        self.collection.delete(where={"ingest_run": run_id})
+                        # A commit may succeed even if its acknowledgement is
+                        # lost. Never delete vectors until inactivity is known.
+                        if not self.index.is_active(stage.run_id):
+                            self.collection.delete(where={"ingest_run": stage.run_id})
                     except Exception:
                         logger.warning("Staged vector cleanup failed; inactive rows remain hidden", exc_info=True)
         # Captured under the commit lock: these runs can never become active again,
@@ -61,6 +61,7 @@ class VectorStoreService:
         for retired_run in retired_runs:
             try:
                 self.collection.delete(where={"ingest_run": retired_run})
+                self.index.discard_retired(retired_run)
             except Exception:
                 logger.warning("Retired vector cleanup failed; rows remain hidden", exc_info=True)
         return count
@@ -114,12 +115,12 @@ class VectorStoreService:
             try:
                 dense = self._dense_search(query, candidates, filter)
             except Exception:
-                logger.warning("Dense retrieval failed; using BM25", exc_info=True)
+                logger.warning("Dense retrieval failed; using PostgreSQL full-text search", exc_info=True)
                 dense = []
             try:
                 lexical = self.index.search(query, candidates, filter)
             except Exception:
-                logger.warning("BM25 retrieval failed; using dense retrieval", exc_info=True)
+                logger.warning("PostgreSQL lexical retrieval failed; using dense retrieval", exc_info=True)
                 lexical = []
             scores, documents = {}, {}
             for ranking in (dense, lexical):

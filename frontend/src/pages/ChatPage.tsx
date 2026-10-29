@@ -73,6 +73,7 @@ export const ChatPage = () => {
     // Arxiv conversation state
     const [arxivConversations, setArxivConversations] = useState<ArxivConversation[]>([]);
     const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+    const [normalConversationId, setNormalConversationId] = useState<string | null>(null);
     const [arxivOnline, setArxivOnline] = useState(false);
     const [streamStatus, setStreamStatus] = useState<string | null>(null);
     const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -158,7 +159,7 @@ export const ChatPage = () => {
     const fetchArxivConversations = useCallback(async () => {
         if (!user?.id) return;
         try {
-            const res = await fetch(`${API_URL}/conversations?user_id=${user.id}`);
+            const res = await fetch(`${API_URL}/conversations?user_id=${user.id}`, { headers: await authHeaders(getToken) });
             if (res.ok) {
                 const data = await res.json();
                 setArxivConversations(data.conversations || []);
@@ -166,11 +167,11 @@ export const ChatPage = () => {
         } catch (e) {
             console.error("Failed to fetch arxiv conversations", e);
         }
-    }, [user?.id]);
+    }, [user?.id, getToken]);
 
     const loadConversation = async (conversationId: string) => {
         try {
-            const res = await fetch(`${API_URL}/conversations/${conversationId}/messages`);
+            const res = await fetch(`${API_URL}/conversations/${conversationId}/messages`, { headers: await authHeaders(getToken) });
             if (!res.ok) throw new Error('Failed to load conversation');
             const data = await res.json();
 
@@ -195,12 +196,13 @@ export const ChatPage = () => {
         e.stopPropagation();
         try {
             await fetch(`${API_URL}/conversations/${conversationId}`, {
-                method: 'DELETE'
+                method: 'DELETE', headers: await authHeaders(getToken)
             });
             setArxivConversations(prev => prev.filter(c => c.id !== conversationId));
             if (activeConversationId === conversationId) {
                 setMessages([]);
                 setActiveConversationId(null);
+                setNormalConversationId(null);
             }
         } catch (e) {
             console.error("Failed to delete conversation", e);
@@ -322,7 +324,7 @@ export const ChatPage = () => {
         try {
             const res = await fetch(`${API_URL}/chat/stream`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: await authHeaders(getToken),
                 body: JSON.stringify({
                     message: userMessage.content,
                     conversation_id: activeConversationId || undefined,
@@ -430,7 +432,8 @@ export const ChatPage = () => {
                 headers,
                 body: JSON.stringify({
                     message: userMessage.content,
-                    history: messages
+                    history: messages,
+                    conversation_id: normalConversationId || undefined
                 })
             });
 
@@ -468,7 +471,9 @@ export const ChatPage = () => {
 
                         try {
                             const data = JSON.parse(dataStr);
-                            if (data.content) {
+                            if (data.conversation_id) {
+                                setNormalConversationId(data.conversation_id);
+                            } else if (data.content) {
                                 setMessages(prev => prev.map(msg =>
                                     msg.id === aiMessage.id
                                         ? { ...msg, content: msg.content + data.content }
@@ -577,6 +582,7 @@ export const ChatPage = () => {
         setPrompt('');
         setUploadedFiles([]);
         setActiveConversationId(null);
+        setNormalConversationId(null);
         setStreamStatus(null);
         setSelectedMode('normal');
     };
@@ -586,6 +592,7 @@ export const ChatPage = () => {
         setPrompt('');
         setUploadedFiles([]);
         setActiveConversationId(null);
+        setNormalConversationId(null);
         setStreamStatus(null);
         setSelectedMode('arxiv');
     };

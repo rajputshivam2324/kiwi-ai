@@ -116,25 +116,27 @@ class ResearchTools:
             # first/middle/last passages when the full paper exceeds the budget.
             import tempfile
             from pathlib import Path
-            from app.services.research.document_index import DocumentIndex
+            import json
             with downloaded_pdf(pdf_url) as (path, _), tempfile.TemporaryDirectory(prefix="kiwi-summary-") as temp:
-                with DocumentIndex(Path(temp) / "pages.sqlite3").connect() as db:
-                    db.execute("CREATE TABLE pages (number INTEGER PRIMARY KEY, text TEXT)")
+                offsets, total_pages = [], 0
+                spool = Path(temp) / "pages.jsonl"
+                with spool.open("w+", encoding="utf-8") as handle:
                     for page in iter_pdf_pages(path):
-                        db.execute("INSERT INTO pages VALUES (?, ?)", (page.number, page.text))
-                    count = db.execute("SELECT count(*) FROM pages").fetchone()[0]
+                        offsets.append(handle.tell())
+                        handle.write(json.dumps({"page": page.number, "text": page.text}) + "\n")
+                        total_pages = page.number
+                    count = len(offsets)
                     if not count:
                         raise ValueError("PDF has no readable pages")
-                    # Evenly spaced pages keep memory bounded; explicitly report sampling.
-                    offsets = sorted({round(i * (count - 1) / max(1, min(count, 12) - 1))
-                                      for i in range(min(count, 12))})
+                    selected = sorted({round(i * (count - 1) / max(1, min(count, 12) - 1))
+                                       for i in range(min(count, 12))})
                     extracts, page_numbers = [], []
-                    for offset in offsets:
-                        row = db.execute("SELECT number, text FROM pages ORDER BY number LIMIT 1 OFFSET ?", (offset,)).fetchone()
-                        page_numbers.append(row[0])
-                        extracts.append(f"[Page {row[0]}]\n" + truncate_tokens(row[1], 3600 // len(offsets)))
+                    for offset in selected:
+                        handle.seek(offsets[offset])
+                        row = json.loads(handle.readline())
+                        page_numbers.append(row["page"])
+                        extracts.append(f"[Page {row['page']}]\n" + truncate_tokens(row["text"], 3600 // len(selected)))
                     full_text = "\n\n".join(extracts)
-                    total_pages = db.execute("SELECT max(number) FROM pages").fetchone()[0]
             sections = {"full_extract": full_text}
 
             abstract_match = re.search(
@@ -150,7 +152,7 @@ class ResearchTools:
                 "success": True,
                 "arxiv_id": arxiv_id,
                 "total_pages": total_pages,
-                "sampled": count > len(offsets),
+                "sampled": count > len(selected),
                 "pages_in_context": page_numbers,
                 "sections": sections,
             }

@@ -1,6 +1,7 @@
 """Offline regression and retrieval checks using actual PDFs and Chroma."""
 from contextlib import contextmanager
 from unittest.mock import Mock
+import hashlib
 
 import pymupdf
 import pytest
@@ -20,6 +21,7 @@ def settings(monkeypatch, tmp_path):
     monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
     monkeypatch.setenv("LANGFUSE_ENABLED", "false")
     monkeypatch.setenv("CHROMA_DB_PATH", str(tmp_path / "chroma"))
+    monkeypatch.setenv("COLLECTION_NAME", "test-" + hashlib.sha256(str(tmp_path).encode()).hexdigest()[:20])
     monkeypatch.setenv("RAG_OCR_ENABLED", "false")
     get_settings.cache_clear()
     yield get_settings()
@@ -45,8 +47,13 @@ class FakeEmbeddings:
 
 @pytest.fixture
 def store(monkeypatch):
+    import os
+    if not os.getenv("TEST_DATABASE_URL"):
+        pytest.skip("TEST_DATABASE_URL is required for PostgreSQL-backed retrieval tests")
     monkeypatch.setattr(vector_module, "GoogleGenerativeAIEmbeddings", FakeEmbeddings)
-    return vector_module.VectorStoreService()
+    store = vector_module.VectorStoreService()
+    yield store
+    store.index.clear()
 
 
 def make_pdf(path, pages):
@@ -272,3 +279,57 @@ def test_failed_mid_batch_replacement_removes_staged_vectors(store, monkeypatch)
     assert len(calls) == 2
     assert store.get_collection_count() == 1
     assert store.index.matches("paper-a", "old")
+
+
+def test_postgres_migrates_old_sidecar_once_without_reset_resurrection(store, tmp_path):
+    import sqlite3
+    import json
+    path=tmp_path/'legacy.sqlite3'
+    meta={'title':'Legacy Study','arxiv_id':'legacy','pipeline_version':'page-parent-child-v1','parent_id':'old-parent','chunk_id':'old-child'}
+    with sqlite3.connect(path) as db:
+        db.executescript('''CREATE TABLE documents(id TEXT,revision TEXT);
+            CREATE TABLE parents(id TEXT,document_id TEXT,content TEXT);
+            CREATE TABLE chunks(id TEXT,document_id TEXT,parent_id TEXT,content TEXT,metadata TEXT);''')
+        db.execute('INSERT INTO documents VALUES (?,?)',('legacy','v1'))
+        db.execute('INSERT INTO parents VALUES (?,?,?)',('old-parent','legacy','The XZQ991 latency is 17 milliseconds. Full parent passage.'))
+        db.execute('INSERT INTO chunks VALUES (?,?,?,?,?)',('old-child','legacy','old-parent','XZQ991 latency is 17 milliseconds.',json.dumps(meta)))
+    assert store.index.migrate_sqlite(path) == 1
+    assert store.index.get_many(['old-child'])['old-child']['parent_content'].endswith('Full parent passage.')
+    assert store.index.search('XZQ991',3)
+    assert store.index.migrate_sqlite(path) == 0
+    store.index.clear()
+    assert store.index.migrate_sqlite(path) == 0
+    assert not store.index.search('XZQ991',3)
+
+
+def test_staging_parse_failure_rolls_back_invisible_rows(store):
+    def broken():
+        yield {'content':'partial evidence','metadata':{'title':'Broken'}}
+        raise ValueError('page parsing failed')
+    with pytest.raises(ValueError,match='page parsing'):
+        store.index_document('broken','v1',broken())
+    assert not store.index.contains_documents(['broken'])
+    with store.index.pool.connection() as db:
+        count=db.execute('SELECT count(*) AS n FROM rag_runs WHERE collection=%s',(store.index.collection,)).fetchone()['n']
+    assert count == 0
+
+
+def test_postgres_namespace_isolates_collections(store):
+    from app.services.research.document_index import DocumentIndex
+    store.index_document('paper-a','one',chunks('Measured quasar evidence for collection isolation.'))
+    other=DocumentIndex(store.index.collection + '-other')
+    assert not other.search('quasar',5)
+    assert not other.contains_documents(['paper-a'])
+
+
+def test_lost_activation_acknowledgement_cannot_delete_committed_vectors(store, monkeypatch):
+    original=store.index.activate
+    def committed_then_disconnected(stage):
+        original(stage)
+        raise OSError('lost commit acknowledgement')
+    monkeypatch.setattr(store.index,'activate',committed_then_disconnected)
+    with pytest.raises(OSError,match='acknowledgement'):
+        store.index_document('paper-a','v1',chunks('The committed XZQ991 latency is 17 milliseconds.'))
+    assert store.index.matches('paper-a','v1')
+    assert store.get_collection_count() == 1
+    assert store.similarity_search('XZQ991')

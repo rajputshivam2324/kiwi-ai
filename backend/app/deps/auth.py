@@ -39,11 +39,13 @@ def decode_clerk_token(token: str) -> dict:
     """Decode + verify Clerk session JWT. Returns claims (sub = user id)."""
     settings = get_settings()
 
-    if settings.clerk_dev_bypass:
+    if settings.clerk_dev_bypass and settings.app_env.lower() != "production":
         return jwt.decode(token, options={"verify_signature": False})
 
     jwks = _get_jwks_client()
     if jwks is None:
+        if settings.app_env.lower() == "production":
+            raise HTTPException(status_code=503, detail="Authentication is not configured")
         # Fallback: decode without verify if JWKS not configured (warn once)
         logger.warning(
             "CLERK_JWKS_URL not set — decoding JWT without signature verification. "

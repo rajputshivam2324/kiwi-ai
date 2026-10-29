@@ -70,6 +70,18 @@ class Settings(BaseSettings):
     rag_max_pdf_pages: int = Field(default=1000, ge=1)
     rag_ocr_enabled: bool = False
     rag_ocr_language: str = "eng"
+    postgres_pool_size: int = Field(default=4, ge=1, le=20)
+
+    prompt_cache_enabled: bool = True
+    prompt_cache_ttl_seconds: int = Field(default=600, ge=60, le=3600)
+    prompt_cache_min_tokens: int = Field(default=1024, ge=1)
+    prompt_cache_max_tokens: int = Field(default=32000, ge=1024)
+    memory_context_tokens: int = Field(default=4000, ge=256, le=32000)
+    memory_summary_tokens: int = Field(default=800, ge=64, le=4000)
+    memory_recent_messages: int = Field(default=8, ge=2, le=40)
+    memory_compaction_batch: int = Field(default=40, ge=10, le=200)
+    memory_max_compaction_batches: int = Field(default=3, ge=1, le=10)
+    memory_turn_timeout_seconds: int = Field(default=600, ge=60)
 
     # Langfuse is optional; credentials are loaded from this same .env file.
     langfuse_enabled: bool = False
@@ -85,6 +97,8 @@ class Settings(BaseSettings):
             raise ValueError("RAG_CHILD_OVERLAP must be smaller than RAG_CHILD_TOKENS")
         if self.rag_parent_tokens < self.rag_child_tokens:
             raise ValueError("RAG_PARENT_TOKENS must be >= RAG_CHILD_TOKENS")
+        if self.memory_summary_tokens >= self.memory_context_tokens:
+            raise ValueError("MEMORY_SUMMARY_TOKENS must be smaller than MEMORY_CONTEXT_TOKENS")
         return self
 
     # Database

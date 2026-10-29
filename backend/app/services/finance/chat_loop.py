@@ -28,6 +28,7 @@ from app.services.finance.schema_utils import (
     tool_to_openai_declaration,
 )
 from app.services.gemini_client import stream_chat_with_retry
+from app.services.memory import bounded_history
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,9 @@ async def chat_stream(
     conversation: list[dict[str, Any]] = [
         {"role": "system", "content": agent.system_prompt + _ist_date_context()}
     ]
-    for msg in messages:
+    normalized = [{"role":"assistant" if m.get("role") == "model" else m.get("role"),
+                   "content":m.get("content", "")} for m in messages]
+    for msg in bounded_history(normalized):
         role = "assistant" if msg.get("role") == "model" else msg.get("role")
         conversation.append({"role": role, "content": msg.get("content", "")})
 
