@@ -223,17 +223,22 @@ class StagedDocument:
         return count
 
     def _insert(self, batch):
-        with self.index.pool.connection() as db, db.transaction():
-            for ordinal, chunk in batch:
-                meta = dict(chunk['metadata'])
-                parent_id = f"{self.run_id}:{meta.get('parent_id', ordinal)}"
-                chunk_id = f'{self.run_id}:{ordinal}'
-                meta.update(parent_id=parent_id, chunk_id=chunk_id, document_id=self.document_id,
-                            revision=self.revision, ingest_run=self.run_id)
-                db.execute('INSERT INTO rag_parents(id,run_id,content) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING',
-                           (parent_id, self.run_id, chunk.get('parent_content', chunk['content'])))
-                db.execute('INSERT INTO rag_chunks(id,run_id,parent_id,ordinal,content,metadata) VALUES (%s,%s,%s,%s,%s,%s)',
-                           (chunk_id, self.run_id, parent_id, ordinal, chunk['content'], Jsonb(meta)))
+        parents, children = {}, []
+        for ordinal, chunk in batch:
+            meta = dict(chunk['metadata'])
+            parent_id = f"{self.run_id}:{meta.get('parent_id', ordinal)}"
+            chunk_id = f'{self.run_id}:{ordinal}'
+            meta.update(parent_id=parent_id, chunk_id=chunk_id, document_id=self.document_id,
+                        revision=self.revision, ingest_run=self.run_id)
+            parents[parent_id] = (parent_id, self.run_id, chunk.get('parent_content', chunk['content']))
+            children.append((chunk_id, self.run_id, parent_id, ordinal, chunk['content'], Jsonb(meta)))
+        # psycopg executemany pipelines each bounded batch, avoiding a network
+        # round trip for every child/parent on a remote PostgreSQL service.
+        with self.index.pool.connection() as db, db.transaction(), db.cursor() as cursor:
+            cursor.executemany('INSERT INTO rag_parents(id,run_id,content) VALUES (%s,%s,%s) ON CONFLICT DO NOTHING',
+                               list(parents.values()))
+            cursor.executemany('INSERT INTO rag_chunks(id,run_id,parent_id,ordinal,content,metadata) VALUES (%s,%s,%s,%s,%s,%s)',
+                               children)
 
     def batches(self, size):
         after = 0
