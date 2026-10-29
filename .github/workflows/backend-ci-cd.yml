@@ -29,7 +29,6 @@ jobs:
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       LANGFUSE_ENABLED: "false"
-      TIKTOKEN_CACHE_DIR: ${{ runner.temp }}/tiktoken-cache
     defaults:
       run:
         working-directory: backend
@@ -51,7 +50,10 @@ jobs:
           pip check
 
       - name: Cache tokenizer vocabulary
-        run: python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
+        run: |
+          export TIKTOKEN_CACHE_DIR="$RUNNER_TEMP/tiktoken-cache"
+          echo "TIKTOKEN_CACHE_DIR=$TIKTOKEN_CACHE_DIR" >> "$GITHUB_ENV"
+          python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 
       - name: Run evals
         env:
