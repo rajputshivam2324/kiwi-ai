@@ -12,6 +12,7 @@ from openai import APIError, AsyncOpenAI, OpenAI
 from prometheus_client import Counter, Histogram
 
 from app.config import get_settings
+from app.services.observability import enable_openai_tracing, traced
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ def get_api_key() -> str:
 
 
 def get_sync_client(timeout_ms: int | None = None) -> OpenAI:
+    enable_openai_tracing()
     global _sync_client
     settings = get_settings()
     kwargs: dict[str, Any] = {
@@ -61,6 +63,7 @@ def get_sync_client(timeout_ms: int | None = None) -> OpenAI:
 
 
 def get_async_client(timeout_ms: int | None = None) -> AsyncOpenAI:
+    enable_openai_tracing()
     global _async_client
     settings = get_settings()
     kwargs: dict[str, Any] = {
@@ -111,6 +114,7 @@ def compute_backoff_ms(attempt: int, initial_ms: int, max_ms: int, err: BaseExce
     return wait
 
 
+@traced("gemini.stream")
 async def stream_chat_with_retry(
     *,
     messages: list[dict[str, Any]],

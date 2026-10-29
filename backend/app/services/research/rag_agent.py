@@ -2,6 +2,9 @@ from app.services.research.prompts import SYSTEM_PROMPT
 from app.services.research.llm_service import get_llm_service
 from app.services.research.vectorstore import get_vectorstore_service
 from app.services.research.tools import analyze_query_for_tools, execute_tools
+from app.config import get_settings
+from app.services.observability import traced
+from app.services.research.pdf_pipeline import token_count, truncate_tokens
 from typing import List, Dict, Any, Iterator
 import json
 import logging
@@ -30,7 +33,7 @@ class RAGAgent:
         return ""
 
     def _format_context(self, documents: List[Dict[str, Any]], seen_ids: set = None) -> str:
-        """Format retrieved documents into context string with explicit URLs for the LLM"""
+        """Keep distinct passages from the same paper within a strict token budget."""
         if not documents:
             return "_No documents found in local knowledge base._"
         
@@ -39,6 +42,7 @@ class RAGAgent:
 
         context_parts = []
         paper_num = 1
+        remaining = get_settings().rag_context_tokens
 
         for doc in documents:
             metadata = doc.get("metadata", {})
@@ -46,8 +50,7 @@ class RAGAgent:
             arxiv_id = metadata.get("arxiv_id", "").strip()
             title = metadata.get("title", "Untitled")
 
-            # Skip duplicate chunks from the same paper
-            key = arxiv_id if arxiv_id else title
+            key = metadata.get("parent_id") or metadata.get("chunk_id") or (arxiv_id, content)
             if key in seen_ids:
                 continue
             seen_ids.add(key)
@@ -55,15 +58,25 @@ class RAGAgent:
             url = self._make_arxiv_url(metadata)
             url_line = f"- **CITE URL** (use exactly): {url}" if url else "- **URL**: Not available"
 
-            context_parts.append(
+            page = metadata.get("page_start")
+            location = f"page {page}" if page else metadata.get("chunk_type", "excerpt")
+            section = truncate_tokens(metadata.get("section", ""), 100)
+            header = (
                 f"[Paper {paper_num}]\n"
-                f"- **Title**: {title}\n"
-                f"- **Authors**: {metadata.get('authors', 'N/A')}\n"
+                f"- **Title**: {truncate_tokens(title, 100)}\n"
+                f"- **Authors**: {truncate_tokens(metadata.get('authors', 'N/A'), 80)}\n"
                 f"- **arXiv ID**: {arxiv_id or 'N/A'}\n"
                 f"- **Published**: {metadata.get('published', 'N/A')}\n"
                 f"{url_line}\n"
-                f"- **Excerpt**: {content[:800]}\n"
+                f"- **Location**: {location}; {section}\n"
+                f"- **Excerpt**: "
             )
+            available = remaining - token_count(header) - 10
+            if available <= 0:
+                break
+            entry = header + truncate_tokens(content, available) + "\n"
+            context_parts.append(entry)
+            remaining -= token_count(entry) + 5
             paper_num += 1
 
         return "\n---\n".join(context_parts) if context_parts else "_No unique documents found._"
@@ -122,7 +135,9 @@ class RAGAgent:
                 parts.append(
                     f"**Paper Summary — arXiv:{result.get('arxiv_id', '?')}** "
                     f"({result.get('total_pages', '?')} pages)\n\n"
-                    f"{sections.get('full_extract', 'No text extracted.')[:4000]}"
+                    f"Sampled pages: {result.get('pages_in_context', [])}; "
+                    f"sampling applied: {result.get('sampled', False)}\n\n"
+                    f"{sections.get('full_extract', 'No text extracted.')}"
                 )
             
             elif tool_name == "compare_papers":
@@ -206,11 +221,12 @@ class RAGAgent:
             logger.warning("Knowledge base retrieval failed (continuing with live arXiv): %s", e)
             return []
 
+    @traced("research.rag.query", "agent")
     def query(
         self,
         user_query: str,
         conversation_history: List[Dict[str, str]] = None,
-        k: int = 3
+        k: int = 6
     ) -> Dict[str, Any]:
         """Non-streaming RAG query with tools"""
         try:
@@ -277,11 +293,12 @@ class RAGAgent:
             logger.error(f"Error in RAG query: {e}")
             raise
     
+    @traced("research.rag.stream", "agent")
     def query_stream(
         self,
         user_query: str,
         conversation_history: List[Dict[str, str]] = None,
-        k: int = 3
+        k: int = 6
     ) -> Iterator[Dict[str, Any]]:
         """Streaming RAG query with tools"""
         try:

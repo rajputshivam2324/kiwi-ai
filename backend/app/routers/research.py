@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from contextvars import copy_context
+from threading import Event
 from typing import AsyncIterator
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,6 +14,9 @@ from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
 from app.deps.rate_limit import rate_limit_dependency
+
+from app.services.observability import trace_attributes, traced
+
 from app.models.research import (
     ChatRequest,
     ChatResponse,
@@ -74,8 +79,8 @@ async def research_health():
         "knowledge_base_error": kb_error,
     }
 
-
 @router.get("/api/research/search")
+@traced("research.search_papers", "tool")
 async def research_search_test(q: str = Query(..., min_length=2)):
     """Debug endpoint — test live arXiv search and return raw results."""
     from app.services.research.arxiv_client import search_papers
@@ -179,15 +184,16 @@ async def chat(
                 for msg in request.conversation_history
             ]
 
-        result = rag_agent.query(
-            user_query=request.message, conversation_history=history, k=3
-        )
-
         conv_id = request.conversation_id
+        if request.user_id and not conv_id:
+            conv_id = await create_conversation(request.user_id)
+            await auto_title_conversation(conv_id, request.message)
+        with trace_attributes(request.user_id, conv_id):
+            result = await asyncio.to_thread(
+                rag_agent.query, user_query=request.message, conversation_history=history, k=6
+            )
+
         if request.user_id:
-            if not conv_id:
-                conv_id = await create_conversation(request.user_id)
-                await auto_title_conversation(conv_id, request.message)
             await add_message(conv_id, "user", request.message)
             await add_message(
                 conv_id, "assistant", result["answer"], result.get("sources")
@@ -231,31 +237,41 @@ async def generate_chat_stream(
         queue: asyncio.Queue = asyncio.Queue()
         sentinel = object()
 
+        stopped = Event()
+        loop = asyncio.get_running_loop()
+
         def _run_sync_stream():
             try:
-                for chunk in rag_agent.query_stream(
-                    user_query=message,
-                    conversation_history=conversation_history,
-                    k=3,
-                ):
-                    queue.put_nowait(chunk)
+                with trace_attributes(user_id, conv_id):
+                    stream = rag_agent.query_stream(
+                        user_query=message, conversation_history=conversation_history, k=6,
+                    )
+                    try:
+                        for chunk in stream:
+                            if stopped.is_set():
+                                break
+                            loop.call_soon_threadsafe(queue.put_nowait, chunk)
+                    finally:
+                        stream.close()
             except Exception as stream_err:
-                queue.put_nowait({"type": "error", "data": str(stream_err)})
+                loop.call_soon_threadsafe(queue.put_nowait, {"type": "error", "data": str(stream_err)})
             finally:
-                queue.put_nowait(sentinel)
+                loop.call_soon_threadsafe(queue.put_nowait, sentinel)
 
-        loop = asyncio.get_event_loop()
-        stream_task = loop.run_in_executor(None, _run_sync_stream)
+        stream_task = loop.run_in_executor(None, copy_context().run, _run_sync_stream)
 
-        while True:
-            chunk = await queue.get()
-            if chunk is sentinel:
-                break
-            if chunk.get("type") == "content":
-                full_response += chunk.get("data", "")
-            elif chunk.get("type") == "sources":
-                sources_data = chunk.get("data", [])
-            yield f"data: {json.dumps(chunk)}\n\n"
+        try:
+            while True:
+                chunk = await queue.get()
+                if chunk is sentinel:
+                    break
+                if chunk.get("type") == "content":
+                    full_response += chunk.get("data", "")
+                elif chunk.get("type") == "sources":
+                    sources_data = chunk.get("data", [])
+                yield f"data: {json.dumps(chunk)}\n\n"
+        finally:
+            stopped.set()
 
         await stream_task
 
@@ -319,15 +335,18 @@ async def ingest_arxiv(
     try:
         from app.scripts.ingest_arxiv import ingest_papers
 
-        result = ingest_papers(
+        result = await asyncio.to_thread(ingest_papers,
             query=request.query,
             max_results=request.max_results,
             vectorstore=vectorstore,
+            include_full_text=request.include_full_text,
         )
         return IngestResponse(
-            status="success",
+            status=result["status"],
             documents_added=result["documents_added"],
             arxiv_ids=result["arxiv_ids"],
+            skipped_arxiv_ids=result["skipped_arxiv_ids"],
+            errors=result["errors"],
         )
     except Exception as e:
         raise HTTPException(500, detail=str(e)) from e

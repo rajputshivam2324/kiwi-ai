@@ -1,9 +1,23 @@
 from langchain_google_genai import ChatGoogleGenerativeAI
 from app.config import get_settings
+from app.services.observability import langchain_config
 from typing import Iterator, Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _text_content(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            block if isinstance(block, str) else block.get("text", "")
+            for block in content
+            if isinstance(block, str) or (isinstance(block, dict) and not block.get("thought")
+                                         and block.get("type") == "text")
+        )
+    return ""
 
 
 class LLMService:
@@ -20,9 +34,9 @@ class LLMService:
     def invoke(self, messages: list) -> Dict[str, Any]:
         """Non-streaming invocation"""
         try:
-            response = self.client.invoke(messages)
+            response = self.client.invoke(messages, config=langchain_config())
             result = {
-                "content": response.content,
+                "content": _text_content(response.content),
                 "reasoning": None
             }
             
@@ -39,9 +53,7 @@ class LLMService:
     def stream(self, messages: list) -> Iterator[Dict[str, str]]:
         """Streaming invocation"""
         try:
-            for chunk in self.client.stream(messages):
-                result = {"type": "content", "data": ""}
-                
+            for chunk in self.client.stream(messages, config=langchain_config()):
                 # Check for reasoning content
                 if chunk.additional_kwargs and "reasoning_content" in chunk.additional_kwargs:
                     yield {
@@ -50,10 +62,11 @@ class LLMService:
                     }
                 
                 # Yield regular content
-                if chunk.content:
+                content = _text_content(chunk.content)
+                if content:
                     yield {
                         "type": "content",
-                        "data": chunk.content
+                        "data": content
                     }
         except Exception as e:
             logger.error(f"LLM streaming error: {e}")

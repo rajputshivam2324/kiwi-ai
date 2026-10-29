@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.config import get_settings
+from app.services.observability import get_langfuse, shutdown_langfuse
 from app.routers import builder, chat, finance, research
 from app.services.builder.db import close_builder_pool, init_builder_db
 from app.services.builder.jobs import (
@@ -44,6 +46,7 @@ def _enabled_modules() -> list[str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Kiwi AI unified backend")
+    get_langfuse()
     logger.info("LLM model: %s", settings.llm_model)
     ensure_workspaces_dir()
 
@@ -69,8 +72,6 @@ async def lifespan(app: FastAPI):
 
     if settings.finance_available:
         # Groww MCP: connect in background so OAuth does not block HTTP startup
-        import asyncio
-
         mcp = get_mcp_client()
         mcp.start_background_connect()
         logger.info(
@@ -98,6 +99,7 @@ async def lifespan(app: FastAPI):
         await disconnect_mcp()
     await close_builder_pool()
     await close_research_pool()
+    await asyncio.to_thread(shutdown_langfuse)
 
 
 app = FastAPI(

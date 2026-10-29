@@ -31,6 +31,9 @@ uvicorn app.main:app --reload --port 8000
 Docs: http://localhost:8000/docs  
 HLD (interview): [`docs/HLD.md`](docs/HLD.md)
 
+Research ingestion, hybrid retrieval, migration, OCR, and Langfuse setup:
+[`docs/RESEARCH_RAG.md`](docs/RESEARCH_RAG.md).
+
 ## Docker
 
 Build the backend image:

@@ -45,14 +45,17 @@ class ArxivDocument(BaseModel):
 
 
 class IngestRequest(BaseModel):
-    query: str = Field(..., description="arXiv search query")
-    max_results: int = Field(default=5, description="Maximum papers to fetch")
+    query: str = Field(..., min_length=2, max_length=1000, description="arXiv search query")
+    max_results: int = Field(default=5, ge=1, le=50, description="Maximum papers to fetch")
+    include_full_text: bool = True
 
 
 class IngestResponse(BaseModel):
     status: str
     documents_added: int
     arxiv_ids: List[str]
+    skipped_arxiv_ids: List[str] = Field(default_factory=list)
+    errors: List[Dict[str, str]] = Field(default_factory=list)
 
 
 # ─── Conversation models ─────────────────────────────────────────────

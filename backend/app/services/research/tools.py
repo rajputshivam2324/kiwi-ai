@@ -1,10 +1,9 @@
-import httpx
 import logging
-import io
 import re
 from typing import List, Dict, Any
 
-from pypdf import PdfReader
+from app.services.observability import traced
+from app.services.research.pdf_pipeline import downloaded_pdf, iter_pdf_pages, truncate_tokens
 
 from app.services.research.arxiv_client import (
     clean_arxiv_id,
@@ -21,6 +20,7 @@ class ResearchTools:
     """Collection of research tools for the arXiv chatbot"""
 
     @staticmethod
+    @traced("research.tool.search_arxiv_live", "tool")
     def search_arxiv_live(query: str, max_results: int = 5) -> Dict[str, Any]:
         """
         Real-time arXiv search. Returns structured paper metadata.
@@ -56,6 +56,7 @@ class ResearchTools:
             return {"tool": "search_arxiv_live", "success": False, "error": str(e)}
 
     @staticmethod
+    @traced("research.tool.get_paper_details", "tool")
     def get_paper_details(arxiv_id: str) -> Dict[str, Any]:
         """
         Fetch detailed metadata for a specific arXiv paper.
@@ -99,6 +100,7 @@ class ResearchTools:
             return {"tool": "get_paper_details", "success": False, "error": str(e)}
 
     @staticmethod
+    @traced("research.tool.summarize_paper", "tool")
     def summarize_paper(arxiv_id: str) -> Dict[str, Any]:
         """
         Download a paper's PDF and extract key sections for summarization.
@@ -110,25 +112,30 @@ class ResearchTools:
             arxiv_id = clean_arxiv_id(arxiv_id)
             pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
 
-            response = httpx.get(
-                pdf_url,
-                timeout=30,
-                follow_redirects=True,
-                headers={"User-Agent": "KiwiAI-Research/1.0"},
-            )
-            response.raise_for_status()
-
-            reader = PdfReader(io.BytesIO(response.content))
-
-            text_parts = []
-            for page in reader.pages[:8]:
-                text_parts.append(page.extract_text())
-
-            full_text = "\n\n".join(text_parts)
-
-            sections = {
-                "full_extract": full_text[:6000],
-            }
+            # Cover the whole paper, including conclusions and appendices. Keep
+            # first/middle/last passages when the full paper exceeds the budget.
+            import tempfile
+            from pathlib import Path
+            from app.services.research.document_index import DocumentIndex
+            with downloaded_pdf(pdf_url) as (path, _), tempfile.TemporaryDirectory(prefix="kiwi-summary-") as temp:
+                with DocumentIndex(Path(temp) / "pages.sqlite3").connect() as db:
+                    db.execute("CREATE TABLE pages (number INTEGER PRIMARY KEY, text TEXT)")
+                    for page in iter_pdf_pages(path):
+                        db.execute("INSERT INTO pages VALUES (?, ?)", (page.number, page.text))
+                    count = db.execute("SELECT count(*) FROM pages").fetchone()[0]
+                    if not count:
+                        raise ValueError("PDF has no readable pages")
+                    # Evenly spaced pages keep memory bounded; explicitly report sampling.
+                    offsets = sorted({round(i * (count - 1) / max(1, min(count, 12) - 1))
+                                      for i in range(min(count, 12))})
+                    extracts, page_numbers = [], []
+                    for offset in offsets:
+                        row = db.execute("SELECT number, text FROM pages ORDER BY number LIMIT 1 OFFSET ?", (offset,)).fetchone()
+                        page_numbers.append(row[0])
+                        extracts.append(f"[Page {row[0]}]\n" + truncate_tokens(row[1], 3600 // len(offsets)))
+                    full_text = "\n\n".join(extracts)
+                    total_pages = db.execute("SELECT max(number) FROM pages").fetchone()[0]
+            sections = {"full_extract": full_text}
 
             abstract_match = re.search(
                 r"(?:abstract|Abstract|ABSTRACT)[:\s]*\n?(.*?)(?:\n\s*\n|\n\d+\s+Introduction)",
@@ -142,7 +149,9 @@ class ResearchTools:
                 "tool": "summarize_paper",
                 "success": True,
                 "arxiv_id": arxiv_id,
-                "total_pages": len(reader.pages),
+                "total_pages": total_pages,
+                "sampled": count > len(offsets),
+                "pages_in_context": page_numbers,
                 "sections": sections,
             }
 
@@ -151,6 +160,7 @@ class ResearchTools:
             return {"tool": "summarize_paper", "success": False, "error": str(e)}
 
     @staticmethod
+    @traced("research.tool.compare_papers", "tool")
     def compare_papers(arxiv_ids: List[str]) -> Dict[str, Any]:
         """
         Fetch metadata for multiple papers to enable comparison.
@@ -185,6 +195,7 @@ class ResearchTools:
             return {"tool": "compare_papers", "success": False, "error": str(e)}
 
     @staticmethod
+    @traced("research.tool.search_knowledge_base", "tool")
     def search_knowledge_base(query: str, k: int = 5) -> Dict[str, Any]:
         """
         Search the local ChromaDB vector store for previously ingested papers.
@@ -302,16 +313,13 @@ def analyze_query_for_tools(query: str) -> List[Dict[str, Any]]:
                 "args": {"query": search_query, "max_results": 5},
             }
         )
-        tool_calls.append(
-            {
-                "tool": "search_knowledge_base",
-                "args": {"query": search_query, "k": 3},
-            }
-        )
+        # The agent always runs hybrid retrieval after tools. Avoid paying for
+        # a duplicate query embedding and inserting truncated duplicate evidence.
 
     return tool_calls
 
 
+@traced("research.tools")
 def execute_tools(tool_calls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Execute a list of tool calls and return results"""
     tools = ResearchTools()

@@ -3,7 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, AliasChoices
+from pydantic import Field, AliasChoices, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
@@ -60,6 +60,32 @@ class Settings(BaseSettings):
     embedding_model: str = "gemini-embedding-001"
     chroma_db_path: str = str(BACKEND_ROOT / "data" / "chroma_db")
     collection_name: str = "arxiv_papers"
+    rag_child_tokens: int = Field(default=350, ge=64, le=1000)
+    rag_child_overlap: int = Field(default=50, ge=0)
+    rag_parent_tokens: int = Field(default=1200, ge=128, le=4000)
+    rag_embedding_batch_size: int = Field(default=32, ge=1, le=100)
+    rag_candidate_count: int = Field(default=30, ge=5, le=200)
+    rag_context_tokens: int = Field(default=6000, ge=256, le=24000)
+    rag_max_pdf_bytes: int = Field(default=50 * 1024 * 1024, ge=1024)
+    rag_max_pdf_pages: int = Field(default=1000, ge=1)
+    rag_ocr_enabled: bool = False
+    rag_ocr_language: str = "eng"
+
+    # Langfuse is optional; credentials are loaded from this same .env file.
+    langfuse_enabled: bool = False
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_base_url: str = "https://cloud.langfuse.com"
+    langfuse_capture_content: bool = False
+    langfuse_sample_rate: float = Field(default=1.0, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def validate_rag_sizes(self):
+        if self.rag_child_overlap >= self.rag_child_tokens:
+            raise ValueError("RAG_CHILD_OVERLAP must be smaller than RAG_CHILD_TOKENS")
+        if self.rag_parent_tokens < self.rag_child_tokens:
+            raise ValueError("RAG_PARENT_TOKENS must be >= RAG_CHILD_TOKENS")
+        return self
 
     # Database
     database_url: str = "postgresql://kiwi:kiwi_secret_2024@localhost:5432/kiwi_ai"
